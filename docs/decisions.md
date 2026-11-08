@@ -65,7 +65,7 @@ serialized; documented, acceptable for a single-salon MVP. Multi-instance would 
 with a unique constraint or a distributed lock.
 
 ## ADR-006 — Caller identity and appointment ownership
-**Status:** Proposed — depends on G0 findings
+**Status:** Accepted (Tigran, 2026-11-09) — metadata first, see amendment below
 **Decision (preferred):** `caller_phone` and `call_id` come from Suisse Line call metadata, never from
 the LLM. A caller can list/cancel only bookings whose `phoneHash` matches; a foreign booking returns
 `NOT_FOUND`.
@@ -155,6 +155,19 @@ not prevent duplicates on its own.
   timed opaque events block their time plus the 10-minute buffer.
 - Additional business codes (HTTP 200, `ok:false`, ADR-014): `DATE_IN_PAST`, `BEYOND_HORIZON`,
   `INVALID_NAME`, `NO_AVAILABILITY`.
+
+## ADR-014 / ADR-006 amendment — caller number from call metadata
+**Status:** Accepted (Tigran, 2026-11-09)
+**Evidence:** G1 real phone call — the platform knew the caller number (the assistant read it back);
+browser tests send `phoneNumber: "unknown"`.
+**Decision:** tool endpoints may read exactly one more body field: top-level `phoneNumber`.
+If it is a valid phone number it is the caller identity and overrides any LLM-supplied
+`caller_phone`; otherwise (`unknown`, `Browser Test`, missing) the spoken `caller_phone` argument is
+used; if neither is valid → `PHONE_REQUIRED`. `caller_phone` becomes optional in the tool schema.
+The assistant does not ask for the number unless the tool returns `PHONE_REQUIRED`.
+Everything else in the body stays unread and unlogged.
+**Not adopted:** spelling the name back before booking (Tigran, 2026-11-09) — ASR name errors are an
+accepted, documented limitation; staff see the phone number on every event.
 
 ## ADR-010 amendment — webhook authentication
 **Status:** Accepted (Tigran, 2026-11-09)
