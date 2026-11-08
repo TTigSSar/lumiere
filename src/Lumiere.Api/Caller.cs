@@ -19,6 +19,15 @@ public static partial class Caller
         return s;
     }
 
+    /// <summary>
+    /// Caller identity (ADR-014 / ADR-006 amendment): a valid call-metadata <c>phoneNumber</c> wins and
+    /// overrides the spoken number; otherwise the spoken <c>caller_phone</c>; otherwise none.
+    /// </summary>
+    public static (string? Phone, string Source) Resolve(string? metadataPhone, string? spokenPhone) =>
+        NormalisePhone(metadataPhone) is { } fromMetadata ? (fromMetadata, "metadata")
+        : NormalisePhone(spokenPhone) is { } spoken ? (spoken, "spoken")
+        : (null, "none");
+
     /// <summary>"+41 79 *** ** 12" — safe for logs.</summary>
     public static string MaskPhone(string? e164)
     {

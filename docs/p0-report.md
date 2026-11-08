@@ -54,7 +54,7 @@ All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by s
 | Endpoint | Input | Output | Errors | Idempotency |
 |---|---|---|---|---|
 | `POST /tools/check-availability` | `service`, `date_hint`, `part_of_day?` | `today`, ≤ 3 `{slot_id, spoken_label}` | `UNKNOWN_SERVICE`, `CLOSED` (+ next open day), `CALENDAR_UNAVAILABLE` | read-only |
-| `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone`¹ | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `CALENDAR_UNAVAILABLE` | `slot_id + caller_phone` |
+| `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone?`² | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | `slot_id + caller phone` |
 | `POST /tools/my-appointments` | `caller_phone`¹ | ≤ 3 `{booking_id, spoken_label}` | — | read-only |
 | `POST /tools/cancel` | `booking_id`, `caller_phone`¹ | `cancelled` | `NOT_FOUND` (incl. foreign bookings) | repeat-safe |
 | `POST /tools/join-waitlist` | `service`, `preferred_days`, `part_of_day`, `first_name`, `caller_phone`¹ | `waitlist_id` | `INVALID_WINDOW` | `service + caller_phone` |
@@ -62,6 +62,9 @@ All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by s
 | `GET /health` | — | 200 | — | — |
 
 ¹ From call metadata if G0 shows it is available; otherwise spoken + normalised (ADR-006).
+² Caller = top-level body field `phoneNumber` (call metadata) when it is a valid number — it overrides
+`caller_phone`; otherwise (`unknown`, `Browser Test`, missing) the optional spoken `caller_phone`;
+neither valid → `PHONE_REQUIRED` (ADR-014 / ADR-006 amendment).
 Rescheduling = book new slot, then cancel old (no extra endpoint). Cancellation triggers
 Cancellation Recovery internally → Telegram message to staff.
 

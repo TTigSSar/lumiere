@@ -6,24 +6,25 @@ using System.Text.Json;
 namespace Lumiere.Api;
 
 /// <summary>
-/// Live-tool endpoints (ADR-014). Reads only <c>tool.arguments</c> and the X-Tool-Secret header;
-/// the request body (transcript, conversation, prompt) is never logged or stored.
+/// Live-tool endpoints (ADR-014). Reads only <c>tool.arguments</c>, the top-level <c>phoneNumber</c>
+/// (call metadata, ADR-014 / ADR-006 amendment) and the X-Tool-Secret header; the rest of the request
+/// body (transcript, conversation, prompt) is never read, logged or stored.
 /// </summary>
 public static class ToolEndpoints
 {
     public static void MapToolEndpoints(this WebApplication app)
     {
         app.MapPost("/tools/check-availability", (HttpContext http, BookingService booking) =>
-            Handle(http, "check-availability", (a, ct) =>
+            Handle(http, "check-availability", (a, _, ct) =>
                 booking.CheckAvailabilityAsync(a.GetValueOrDefault("service"), a.GetValueOrDefault("date_hint"), a.GetValueOrDefault("part_of_day"), ct)));
 
         app.MapPost("/tools/book", (HttpContext http, BookingService booking) =>
-            Handle(http, "book", (a, ct) =>
-                booking.BookAsync(a.GetValueOrDefault("slot_id"), a.GetValueOrDefault("first_name"), a.GetValueOrDefault("last_name"), a.GetValueOrDefault("caller_phone"), ct)));
+            Handle(http, "book", (a, callerPhone, ct) =>
+                booking.BookAsync(a.GetValueOrDefault("slot_id"), a.GetValueOrDefault("first_name"), a.GetValueOrDefault("last_name"), callerPhone, ct)));
     }
 
     private static async Task<IResult> Handle(HttpContext http, string endpoint,
-        Func<IReadOnlyDictionary<string, string>, CancellationToken, Task<ToolResult>> run)
+        Func<IReadOnlyDictionary<string, string>, string?, CancellationToken, Task<ToolResult>> run)
     {
         var started = Stopwatch.GetTimestamp();
         var log = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Lumiere.Tools");
@@ -35,17 +36,18 @@ public static class ToolEndpoints
             return Results.StatusCode(StatusCodes.Status401Unauthorized);
         }
 
-        var args = await ReadArgumentsAsync(http.Request, ct);
-        if (args is null)
+        var request = await ReadRequestAsync(http.Request, ct);
+        if (request is not { } parsed)
         {
             log.LogWarning("tool {Endpoint} -> 400", endpoint);
             return Results.BadRequest(new { ok = false, error_code = "BAD_REQUEST" });
         }
 
-        var result = await run(args, ct);
-        log.LogInformation("tool {Endpoint} -> {Outcome} in {LatencyMs} ms, phone {Phone}", endpoint, result.ErrorCode ?? "OK",
-            (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-            Caller.MaskPhone(Caller.NormalisePhone(args.GetValueOrDefault("caller_phone"))));
+        var (args, metadataPhone) = parsed;
+        var (callerPhone, source) = Caller.Resolve(metadataPhone, args.GetValueOrDefault("caller_phone"));
+        var result = await run(args, callerPhone, ct);
+        log.LogInformation("tool {Endpoint} -> {Outcome} in {LatencyMs} ms, phone {Phone} source={PhoneSource}", endpoint, result.ErrorCode ?? "OK",
+            (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, Caller.MaskPhone(callerPhone), source);
         return Results.Json(result);
     }
 
@@ -58,8 +60,11 @@ public static class ToolEndpoints
             SHA256.HashData(Encoding.UTF8.GetBytes(expected)), SHA256.HashData(Encoding.UTF8.GetBytes(given)));
     }
 
-    /// <summary>Primitive values of <c>tool.arguments</c> as strings; null when the body is malformed.</summary>
-    private static async Task<IReadOnlyDictionary<string, string>?> ReadArgumentsAsync(HttpRequest request, CancellationToken ct)
+    /// <summary>
+    /// Primitive values of <c>tool.arguments</c> as strings plus the top-level <c>phoneNumber</c> (string only,
+    /// else null); null when the body is malformed. Nothing else in the body is read.
+    /// </summary>
+    private static async Task<(IReadOnlyDictionary<string, string> Args, string? MetadataPhone)?> ReadRequestAsync(HttpRequest request, CancellationToken ct)
     {
         try
         {
@@ -81,7 +86,10 @@ public static class ToolEndpoints
                     default: return null;
                 }
             }
-            return result;
+            var metadataPhone = doc.RootElement.TryGetProperty("phoneNumber", out var pn) && pn.ValueKind == JsonValueKind.String
+                ? pn.GetString()
+                : null;
+            return (result, metadataPhone);
         }
         catch (JsonException)
         {
