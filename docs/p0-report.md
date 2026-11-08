@@ -54,10 +54,10 @@ All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by s
 | Endpoint | Input | Output | Errors | Idempotency |
 |---|---|---|---|---|
 | `POST /tools/check-availability` | `service`, `date_hint`, `part_of_day?` | `today`, ≤ 3 `{slot_id, spoken_label}` | `UNKNOWN_SERVICE`, `CLOSED` (+ next open day), `CALENDAR_UNAVAILABLE` | read-only |
-| `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone`¹, `call_id`¹ | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `CALENDAR_UNAVAILABLE` | `call_id + slot_id` |
+| `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone`¹ | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `CALENDAR_UNAVAILABLE` | `slot_id + caller_phone` |
 | `POST /tools/my-appointments` | `caller_phone`¹ | ≤ 3 `{booking_id, spoken_label}` | — | read-only |
 | `POST /tools/cancel` | `booking_id`, `caller_phone`¹ | `cancelled` | `NOT_FOUND` (incl. foreign bookings) | repeat-safe |
-| `POST /tools/join-waitlist` | `service`, `windows[]` (≤ 14 days), `first_name`, `caller_phone`¹ | `waitlist_id` | `INVALID_WINDOW` | `call_id` |
+| `POST /tools/join-waitlist` | `service`, `preferred_days`, `part_of_day`, `first_name`, `caller_phone`¹ | `waitlist_id` | `INVALID_WINDOW` | `service + caller_phone` |
 | `POST /webhooks/suisse` | vendor event | 204 | 401 bad signature | event id |
 | `GET /health` | — | 200 | — | — |
 

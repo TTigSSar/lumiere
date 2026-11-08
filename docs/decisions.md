@@ -52,7 +52,8 @@ events (queries and state transitions become awkward).
   valid, unexpired signed slot and re-checks availability server-side.
 - Bookings are serialized in-process (one async lock around "re-check → insert"), valid because the
   service runs as a single instance.
-- Idempotency key `call_id + slot_id` returns the original result on retry.
+- Idempotency key `slot_id + normalised caller phone` returns the original result on retry
+  (amended 2026-11-09 by ADR-014: tool-call ids change on every invocation, call ids are empty).
 - The assistant confirms only from a successful tool response; any error returns a `say` text that
   never implies success.
 - **No automatic deletion of competing calendar events** as a concurrency strategy.
@@ -117,6 +118,19 @@ UI-related agents (frontend, contract sync, design) were not cloned: there is no
 **Why:** reproducible, reviewable and revertible (the platform keeps versions); prompt and backend
 salon facts change in the same commit; strong engineering story.
 **Rejected:** manual dashboard editing only (drift, no history in Git).
+
+## ADR-014 — Live-tool contract rules (from G0)
+**Status:** Accepted (Tigran, 2026-11-09)
+**Decision:**
+1. Tool parameters are primitives only (platform limit). `join_waitlist` takes strings
+   `preferred_days` and `part_of_day` (caller's words); the server parses them — replaces `windows[]`.
+2. Business outcomes (`SLOT_TAKEN`, `CLOSED`, `NOT_FOUND`, `CALENDAR_UNAVAILABLE`, …) return
+   **HTTP 200** with `ok:false`, `error_code` and `say`. Non-2xx only for auth (401) and malformed
+   requests (400) — on non-2xx the platform hides our body from the assistant.
+3. Booking idempotency key = `slot_id + normalised caller phone`.
+4. Endpoints read only `tool.arguments` and `X-Suisse-*` headers; the request body (full transcript,
+   conversation, system prompt) is never logged or stored.
+**Evidence:** [g0-results.md](g0-results.md).
 
 ## ADR-010 amendment — webhook authentication
 **Status:** Accepted (Tigran, 2026-11-09)
