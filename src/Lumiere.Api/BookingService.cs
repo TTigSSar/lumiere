@@ -25,8 +25,9 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
     private const int AlternativeDays = 7;
 
     // Bookings are serialized process-wide; valid because the service runs as a single instance (ADR-005).
+    // No in-process success cache: the deterministic event id + get-by-id is the idempotency mechanism (ADR-015),
+    // so a repeat after a cancellation in Google is restored instead of answered from memory.
     private static readonly SemaphoreSlim BookingLock = new(1, 1);
-    private readonly Dictionary<string, ToolResult> _completed = new(); // idempotency store, stage 1 (SQLite in P2)
 
     private static ToolResult CalendarUnavailable(bool booking) => ToolResult.Fail("CALENDAR_UNAVAILABLE", booking
         ? "Sorry, I can't reach our calendar right now, so the appointment is not booked. Shall I try again in a moment?"
@@ -90,7 +91,6 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
             return ToolResult.Fail("INVALID_NAME", "Could you tell me your first and last name again, please?");
 
         var (startUtc, service) = slot;
-        var key = $"{startUtc:O}|{service.Key}|{phone}";
         var endUtc = startUtc + service.Duration;
         // Deterministic event id (ADR-015): a retry of the same booking can never create a second event.
         // It doubles as the booking id, so a retry returns the same booking_id.
@@ -99,12 +99,10 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         await BookingLock.WaitAsync(ct);
         try
         {
-            if (_completed.TryGetValue(key, out var previous)) return previous;
-
             ToolResult Booked()
             {
                 var text = $"You're booked for {service.WithArticle} on {Salon.SpokenLabel(startUtc)}. See you then!";
-                return _completed[key] = new ToolResult { Ok = true, BookingId = eventId, ConfirmationText = text, Say = text };
+                return new ToolResult { Ok = true, BookingId = eventId, ConfirmationText = text, Say = text };
             }
 
             CalendarEvent? existing;

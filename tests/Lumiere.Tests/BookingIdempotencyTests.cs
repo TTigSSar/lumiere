@@ -19,7 +19,7 @@ public class BookingIdempotencyTests
         return r.Slots[0].SlotId;
     }
 
-    /// <summary>A fresh service on the same calendar: the in-memory idempotency cache is empty, as after a restart.</summary>
+    /// <summary>A fresh service on the same calendar, as after a restart.</summary>
     private static BookingService Restarted(ICalendar cal, FakeClock clock, SlotIds ids) => new(cal, clock, ids, Key);
 
     [Fact]
@@ -159,6 +159,38 @@ public class BookingIdempotencyTests
 
         var r = await Restarted(cal, clock, ids).BookAsync(slot, "Testy", "Example", Phone, default);
         Assert.Equal("SLOT_TAKEN", r.ErrorCode);
+        Assert.True(cal.AllEvents.Single(e => e.Id == OwnId).Cancelled);
+    }
+
+    [Fact]
+    public async Task Repeat_in_the_same_instance_after_cancellation_restores_the_event()
+    {
+        var (svc, cal, _, _) = Booking();
+        var slot = await TuesdayNineSlot(svc);
+        var first = await svc.BookAsync(slot, "Testy", "Example", Phone, default);
+        cal.Cancel(OwnId); // staff deleted it in Google Calendar; no restart in between
+
+        var again = await svc.BookAsync(slot, "Testy", "Example", Phone, default);
+        Assert.True(again.Ok, again.Say);
+        Assert.Equal(first.BookingId, again.BookingId);
+        var ev = Assert.Single(cal.AllEvents);
+        Assert.Equal(OwnId, ev.Id);
+        Assert.False(ev.Cancelled);
+        Assert.Equal(1, cal.InsertCalls);
+    }
+
+    [Fact]
+    public async Task Repeat_in_the_same_instance_after_cancellation_is_SLOT_TAKEN_when_the_slot_was_taken()
+    {
+        var (svc, cal, _, _) = Booking();
+        var slot = await TuesdayNineSlot(svc);
+        Assert.True((await svc.BookAsync(slot, "Testy", "Example", Phone, default)).Ok);
+        cal.Cancel(OwnId);
+        await cal.InsertAsync(Busy(TuesdayNine, TuesdayNine.AddMinutes(60)), default);
+
+        var again = await svc.BookAsync(slot, "Testy", "Example", Phone, default);
+        Assert.Equal(("SLOT_TAKEN", false), (again.ErrorCode, again.Ok));
+        Assert.Null(again.BookingId);
         Assert.True(cal.AllEvents.Single(e => e.Id == OwnId).Cancelled);
     }
 
