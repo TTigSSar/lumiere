@@ -95,6 +95,8 @@ async function route(url) {
       await new Promise((r) => setTimeout(r, ms));
       return { status: 200, payload: { ok: true, say: `The code word is tangerine ${ms}.`, code_word: `tangerine-${ms}` } };
     }
+    case '/g0/webhook':
+      return { status: 200, payload: { ok: true } };
     case '/g0/error':
       return { status: 500, payload: { ok: false, error_code: 'TEST_ERROR', say: 'The test system reported an error. The code word is lemon.' } };
     default:
