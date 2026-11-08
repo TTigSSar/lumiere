@@ -34,18 +34,31 @@ no servers, domains, tunnels, credentials, repositories, agent rules or decision
 
 ## Agents (`.claude/agents/`)
 
-- `implementer` — writes code + unit tests next to it. Commits its own work; never pushes.
-- `qa` — integration tests, HTTP replay fixtures, concurrency tests, real-call test matrix bookkeeping. Never edits app code.
-- `reviewer` — read-only security / reliability / ADR-conformance review before a milestone.
+| Agent | Role | Writes? |
+|---|---|---|
+| `backend-dev` | Application code + unit tests next to it | yes, `src/**`, unit tests |
+| `verifier` | Proves each change works: build, tests, live walk of endpoints + test calendar | no |
+| `qa-engineer` | Durable suites: integration, replay, concurrency, failure injection; call log | yes, `tests/**`, `docs/evidence/**` |
+| `reviewer` | Read-only security / reliability / ADR review before milestones | no |
+| `platform-engineer` | Demo VPS, Docker, Caddy, tunnel, deploys, smoke | yes, infra files; server only with approval |
 
-Use built-in `Explore`/`Plan` for read-only questions. No other agents. Keep orchestration minimal:
-the main session plans, approves diffs and pushes.
+Built-in `Explore`/`Plan` for read-only questions. No other agents.
 
-### Report format (all agents)
+**Routing:** code change → `backend-dev` → `verifier` (fast). Milestone (G1, feature complete,
+demo) → `qa-engineer` suites + `verifier` (full) + `reviewer`. Infra/deploy → `platform-engineer`
+(approval first). Confirmed bug → `qa-engineer` verdict (regression test required / not justified).
+Writers run sequentially (one codebase). The main session plans, reads each diff and pushes.
 
-First line `STATUS: DONE | BLOCKED | NEEDS_INPUT | FAILED`, then `SUMMARY` (1–3 lines),
-`FILES_MODIFIED`, `CHECKS` (command → pass/fail; required for writers), `OBSTACLES`, `NEXT_STEP`.
-An environment failure is `BLOCKED` immediately. Two failed fixes of the same cause → `BLOCKED`.
+### Report contract (all agents)
+
+First line exactly `STATUS: DONE | BLOCKED | NEEDS_INPUT | FAILED | APPROVAL_REQUIRED`, then
+`SUMMARY` (1–3 lines), `FILES_MODIFIED` (list or `none`), `CHECKS` (command → pass/fail; mandatory
+for writers and verifier), `OBSTACLES`, `NEXT_STEP`. `WHAT_IS_NEEDED` for BLOCKED/NEEDS_INPUT;
+`REASON / PROPOSED_ACTION / RISK / EXPECTED_RESULT` for APPROVAL_REQUIRED. Role sections extend this.
+
+**Stop and retry:** a retry names what changed since the last attempt. Two failed fixes of the same
+cause → `BLOCKED`. An environment failure (credentials, port, tool missing) → `BLOCKED` at once.
+A re-run that turns green is not evidence. A structural question → `NEEDS_INPUT`.
 
 ## Commands (fill in when code exists)
 

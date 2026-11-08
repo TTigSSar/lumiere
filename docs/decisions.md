@@ -8,7 +8,8 @@ Status values: **Accepted** (approved by Tigran) · **Proposed** (awaiting appro
 ## ADR-001 — Full isolation from other projects
 **Status:** Accepted (2026-11-08)
 **Decision:** This project shares no infrastructure, domain, tunnel, credentials, email provider,
-repository, agent configuration or decision log with any other project of the owner.
+repository or decision log with any other project of the owner. Agent definitions were copied
+once and adapted (ADR-011); the copies have no link to the originals.
 **Why:** It is an independent hiring submission; coupling would risk an unrelated production system
 (the candidate host was a 2 GB / 1 vCPU box already using swap) and muddy the story.
 **Rejected:** Co-hosting on the existing production VPS behind a second tunnel (zero technical impact,
@@ -99,9 +100,14 @@ transcripts or recordings stored by us; call recording off in Suisse Line unless
 with consent. Webhooks verified with HMAC-SHA256 and timestamp. Secrets only in env files.
 
 ## ADR-011 — Agent-assisted workflow
-**Status:** Accepted
-**Decision:** Main session (planning, approvals, pushes) + `implementer` + `qa` + read-only
-`reviewer`. Agent configuration is project-local and independent.
+**Status:** Accepted (amended 2026-11-08)
+**Decision:** Main session (planning, approvals, pushes) + `backend-dev`, `verifier`,
+`qa-engineer`, read-only `reviewer`, `platform-engineer`. The agent definitions were cloned from
+the owner's existing workflow at Tigran's request and adapted: all references to the other project
+(its stack, servers, domain, ADRs and lessons) were removed; role boundaries, report contract and
+general lessons were kept. The copies are independent — no shared files, hooks or runtime links.
+UI-related agents (frontend, contract sync, design) were not cloned: there is no frontend.
+**Rejected:** three minimal custom agents (first draft) — replaced to reuse a proven workflow.
 
 ## ADR-012 — G0 probe is throwaway Node.js
 **Status:** Proposed
