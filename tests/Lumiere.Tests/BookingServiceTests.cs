@@ -39,6 +39,8 @@ public class BookingServiceTests
     [InlineData("perm", "tuesday", "UNKNOWN_SERVICE")]
     [InlineData("men's cut", "sometime", "DATE_UNCLEAR")]
     [InlineData("men's cut", "2026-11-03", "DATE_IN_PAST")]
+    [InlineData("men's cut", "yesterday", "DATE_IN_PAST")]
+    [InlineData("men's cut", "last friday", "DATE_IN_PAST")]
     [InlineData("men's cut", "2026-12-18", "BEYOND_HORIZON")]
     public async Task Business_errors(string service, string hint, string code)
     {

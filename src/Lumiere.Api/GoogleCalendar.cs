@@ -1,3 +1,5 @@
+using System.Net;
+using Google;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
@@ -6,8 +8,8 @@ using Google.Apis.Services;
 namespace Lumiere.Api;
 
 /// <summary>
-/// Google Calendar adapter (ADR-003): service account, scope calendar.events only, events.list + events.insert.
-/// NOT YET EXERCISED against a real calendar (no credentials in P1 stage 1).
+/// Google Calendar adapter (ADR-003): service account, scope calendar.events only; events.list, events.insert with a
+/// client-supplied id (ADR-015), events.get and events.update (restore). Never deletes.
 /// </summary>
 public sealed class GoogleCalendar : ICalendar
 {
@@ -57,17 +59,46 @@ public sealed class GoogleCalendar : ICalendar
 
     public async Task<string> InsertAsync(CalendarEvent ev, CancellationToken ct)
     {
-        var body = new Event
+        try
         {
-            Summary = ev.Summary,
-            Description = ev.Description,
-            Start = new EventDateTime { DateTimeDateTimeOffset = Salon.ToLocal(ev.StartUtc), TimeZone = Salon.Zone.Id },
-            End = new EventDateTime { DateTimeDateTimeOffset = Salon.ToLocal(ev.EndUtc), TimeZone = Salon.Zone.Id },
-            ExtendedProperties = new Event.ExtendedPropertiesData { Private__ = new Dictionary<string, string>(ev.PrivateProperties) },
-        };
-        var created = await _service.Events.Insert(body, _calendarId).ExecuteAsync(ct);
-        return created.Id;
+            var created = await _service.Events.Insert(ToGoogle(ev), _calendarId).ExecuteAsync(ct);
+            return created.Id;
+        }
+        catch (GoogleApiException e) when (e.HttpStatusCode == HttpStatusCode.Conflict && ev.Id is not null)
+        {
+            throw new CalendarConflictException(ev.Id);
+        }
     }
+
+    public async Task<CalendarEvent?> GetAsync(string id, CancellationToken ct)
+    {
+        Event e;
+        try { e = await _service.Events.Get(_calendarId, id).ExecuteAsync(ct); }
+        catch (GoogleApiException ex) when (ex.HttpStatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone) { return null; }
+
+        // Deleted events are only guaranteed to carry the id, so times may be missing.
+        var (start, end) = (ToUtc(e.Start), ToUtc(e.End));
+        return new CalendarEvent(e.Id, start ?? default, end ?? default, e.Summary ?? "", e.Description ?? "",
+            e.ExtendedProperties?.Private__?.AsReadOnly() ?? (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(),
+            Cancelled: e.Status == "cancelled");
+    }
+
+    public async Task RestoreAsync(CalendarEvent ev, CancellationToken ct)
+    {
+        var body = ToGoogle(ev);
+        body.Status = "confirmed";
+        await _service.Events.Update(body, _calendarId, ev.Id).ExecuteAsync(ct);
+    }
+
+    private static Event ToGoogle(CalendarEvent ev) => new()
+    {
+        Id = ev.Id,
+        Summary = ev.Summary,
+        Description = ev.Description,
+        Start = new EventDateTime { DateTimeDateTimeOffset = Salon.ToLocal(ev.StartUtc), TimeZone = Salon.Zone.Id },
+        End = new EventDateTime { DateTimeDateTimeOffset = Salon.ToLocal(ev.EndUtc), TimeZone = Salon.Zone.Id },
+        ExtendedProperties = new Event.ExtendedPropertiesData { Private__ = new Dictionary<string, string>(ev.PrivateProperties) },
+    };
 
     /// <summary>Timed events → instant; all-day events → whole local days.</summary>
     private static DateTimeOffset? ToUtc(EventDateTime? t) =>

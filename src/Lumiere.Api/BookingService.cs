@@ -20,6 +20,8 @@ public sealed record ToolResult
 public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotIds slotIds, byte[] phoneHashKey)
 {
     public static readonly TimeSpan CalendarTimeout = TimeSpan.FromSeconds(3);
+    /// <summary>Budget for the single lookup after a failed or timed-out insert (ADR-015).</summary>
+    public static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(1.5);
     private const int AlternativeDays = 7;
 
     // Bookings are serialized process-wide; valid because the service runs as a single instance (ADR-005).
@@ -90,43 +92,71 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         var (startUtc, service) = slot;
         var key = $"{startUtc:O}|{service.Key}|{phone}";
         var endUtc = startUtc + service.Duration;
+        // Deterministic event id (ADR-015): a retry of the same booking can never create a second event.
+        // It doubles as the booking id, so a retry returns the same booking_id.
+        var eventId = EventIds.For(startUtc, service.Key, phone, phoneHashKey);
 
         await BookingLock.WaitAsync(ct);
         try
         {
             if (_completed.TryGetValue(key, out var previous)) return previous;
 
+            ToolResult Booked()
+            {
+                var text = $"You're booked for {service.WithArticle} on {Salon.SpokenLabel(startUtc)}. See you then!";
+                return _completed[key] = new ToolResult { Ok = true, BookingId = eventId, ConfirmationText = text, Say = text };
+            }
+
+            CalendarEvent? existing;
+            try { existing = await WithTimeout(t => calendar.GetAsync(eventId, t), ct); }
+            catch (Exception) { return CalendarUnavailable(booking: true); }
+            if (existing is { Cancelled: false }) return Booked();
+
             var now = clock.GetUtcNow();
             IReadOnlyList<CalendarEvent> busy;
             try { busy = await WithTimeout(t => calendar.ListAsync(startUtc - Salon.Buffer, endUtc + Salon.Buffer, t), ct); }
             catch (Exception) { return CalendarUnavailable(booking: true); }
 
-            if (!Scheduler.Fits(startUtc, service, now, busy))
+            // The booking's own event (same id) never blocks its own slot.
+            if (!Scheduler.Fits(startUtc, service, now, busy.Where(e => e.Id != eventId).ToList()))
                 return await SlotTakenAsync(startUtc, service, now, ct);
 
-            var bookingId = Guid.NewGuid().ToString();
-            var ev = new CalendarEvent(null, startUtc, endUtc,
+            var ev = new CalendarEvent(eventId, startUtc, endUtc,
                 $"{char.ToUpperInvariant(service.SpokenName[0])}{service.SpokenName[1..]} — {first} {char.ToUpperInvariant(last[0])}.",
                 $"Customer: {first} {last}\nPhone: {phone}\nService: {service.SpokenName} ({service.Minutes} min, CHF {service.PriceChf})\nBooked by the AI phone receptionist.",
                 new Dictionary<string, string>
                 {
-                    ["bookingId"] = bookingId,
+                    ["bookingId"] = eventId,
                     ["phoneHash"] = Caller.PhoneHash(phone, phoneHashKey),
                     ["service"] = service.Key,
                     ["source"] = "ai-phone",
                 });
-            try { await WithTimeout(t => calendar.InsertAsync(ev, t), ct); }
-            catch (Exception) { return CalendarUnavailable(booking: true); }
 
-            var text = $"You're booked for {service.WithArticle} on {Salon.SpokenLabel(startUtc)}. See you then!";
-            var result = new ToolResult { Ok = true, BookingId = bookingId, ConfirmationText = text, Say = text };
-            _completed[key] = result;
-            return result;
+            try
+            {
+                if (existing is { Cancelled: true })
+                    await WithTimeout(async t => { await calendar.RestoreAsync(ev, t); return true; }, ct);
+                else
+                    await WithTimeout(t => calendar.InsertAsync(ev, t), ct);
+                return Booked();
+            }
+            catch (Exception)
+            {
+                // Conflict (already exists), timeout or error: the event may exist anyway — look once before answering.
+                return await ExistsConfirmedAsync(eventId, ct) ? Booked() : CalendarUnavailable(booking: true);
+            }
         }
         finally
         {
             BookingLock.Release();
         }
+    }
+
+    /// <summary>One get-by-id with its own short budget; false when missing, cancelled or unreachable.</summary>
+    private async Task<bool> ExistsConfirmedAsync(string eventId, CancellationToken ct)
+    {
+        try { return await WithTimeout(t => calendar.GetAsync(eventId, t), ct, LookupTimeout) is { Cancelled: false }; }
+        catch (Exception) { return false; }
     }
 
     private async Task<ToolResult> SlotTakenAsync(DateTimeOffset startUtc, Service service, DateTimeOffset now, CancellationToken ct)
@@ -154,12 +184,13 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
             Salon.ToUtc(from, TimeOnly.MinValue) - Salon.Buffer,
             Salon.ToUtc(toInclusive.AddDays(1), TimeOnly.MinValue) + Salon.Buffer, t), ct);
 
-    /// <summary>Runs a calendar call with the 3 s budget; throws on timeout or failure.</summary>
-    private static async Task<T> WithTimeout<T>(Func<CancellationToken, Task<T>> call, CancellationToken ct)
+    /// <summary>Runs a calendar call with the 3 s budget (or <paramref name="budget"/>); throws on timeout or failure.</summary>
+    private static async Task<T> WithTimeout<T>(Func<CancellationToken, Task<T>> call, CancellationToken ct, TimeSpan? budget = null)
     {
+        var limit = budget ?? CalendarTimeout;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(CalendarTimeout);
-        return await call(cts.Token).WaitAsync(CalendarTimeout, ct);
+        cts.CancelAfter(limit);
+        return await call(cts.Token).WaitAsync(limit, ct);
     }
 
     private List<SlotDto> ToSlots(IEnumerable<DateTimeOffset> starts, Service service) =>

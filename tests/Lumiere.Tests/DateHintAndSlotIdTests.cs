@@ -26,6 +26,10 @@ public class DateHintTests
     [InlineData("the 12th of November", "2026-11-12")]
     [InlineData("November 12th, 2026", "2026-11-12")]
     [InlineData("2 January", "2027-01-02")]   // past day this year → next year
+    [InlineData("yesterday", "2026-11-08")]   // past relative days → past date (DATE_IN_PAST upstream)
+    [InlineData("day before yesterday", "2026-11-07")]
+    [InlineData("last thursday", "2026-11-05")]
+    [InlineData("last Monday", "2026-11-02")]
     [InlineData("next week", "2026-11-17")]   // Monday 16th closed → Tuesday
     public void Parses(string hint, string expected) =>
         Assert.Equal(DateOnly.Parse(expected), DateHintParser.Parse(hint, Monday));

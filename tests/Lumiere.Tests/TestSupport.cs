@@ -26,7 +26,7 @@ public static class T
     public static Service Svc(string key) => Salon.FindService(key)!;
 
     public static CalendarEvent Busy(DateTimeOffset start, DateTimeOffset end) =>
-        new("busy", start, end, "Existing", "", new Dictionary<string, string>());
+        new(null, start, end, "Existing", "", new Dictionary<string, string>());
 
     public static (BookingService Service, InMemoryCalendar Calendar, FakeClock Clock, SlotIds SlotIds) Booking(DateTimeOffset? now = null)
     {
@@ -42,6 +42,8 @@ public sealed class ThrowingCalendar : ICalendar
     public Task<IReadOnlyList<CalendarEvent>> ListAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<CalendarEvent>>([]);
     public Task<string> InsertAsync(CalendarEvent ev, CancellationToken ct) => throw new HttpRequestException("calendar down");
+    public Task<CalendarEvent?> GetAsync(string id, CancellationToken ct) => Task.FromResult<CalendarEvent?>(null);
+    public Task RestoreAsync(CalendarEvent ev, CancellationToken ct) => throw new HttpRequestException("calendar down");
 }
 
 /// <summary>Captures every log line (message, state values, exception) at all levels.</summary>

@@ -5,7 +5,8 @@ namespace Lumiere.Api;
 
 /// <summary>
 /// Parses the caller's English words for a day into a Zurich local date.
-/// Plain or "this &lt;weekday&gt;" = next occurrence including today; "next &lt;weekday&gt;" = strictly after today.
+/// Plain or "this &lt;weekday&gt;" = next occurrence including today; "next &lt;weekday&gt;" = strictly after today;
+/// "last &lt;weekday&gt;", "yesterday" etc. = past dates (rejected later as DATE_IN_PAST).
 /// Part-of-day words ("next thursday afternoon") are ignored here.
 /// </summary>
 public static partial class DateHintParser
@@ -23,6 +24,10 @@ public static partial class DateHintParser
         {
             case "today": return today;
             case "tomorrow": return today.AddDays(1);
+            // Past relative days parse to a past date so the caller hears DATE_IN_PAST, not DATE_UNCLEAR.
+            case "yesterday": return today.AddDays(-1);
+            case "day before yesterday": return today.AddDays(-2);
+            case "last week": return today.AddDays(-7);
             case "day after tomorrow" or "the day after tomorrow": return today.AddDays(2);
             case "next week":
                 var toMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
@@ -37,6 +42,7 @@ public static partial class DateHintParser
         {
             var ahead = ((int)dow - (int)today.DayOfWeek + 7) % 7;
             if (wd.Groups["mod"].Value == "next" && ahead == 0) ahead = 7;
+            if (wd.Groups["mod"].Value == "last") ahead = ahead == 0 ? -7 : ahead - 7;
             return today.AddDays(ahead);
         }
 
@@ -74,7 +80,7 @@ public static partial class DateHintParser
     [GeneratedRegex(@"\s+")]
     private static partial Regex Spaces();
 
-    [GeneratedRegex(@"^(?:(?<mod>this|next|coming)\s+)?(?<day>[a-z]+)$")]
+    [GeneratedRegex(@"^(?:(?<mod>this|next|coming|last)\s+)?(?<day>[a-z]+)$")]
     private static partial Regex Weekday();
 
     [GeneratedRegex(@"^(?<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?<month>[a-z]+)(?:\s+(?<year>\d{4}))?$")]
