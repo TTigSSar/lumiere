@@ -118,10 +118,11 @@ UI-related agents (frontend, contract sync, design) were not cloned: there is no
 salon facts change in the same commit; strong engineering story.
 **Rejected:** manual dashboard editing only (drift, no history in Git).
 
-## ADR-010 amendment (proposed 2026-11-09) — webhook authentication
-The official API spec documents custom headers on webhooks but no HMAC signing. Proposed: verify
+## ADR-010 amendment — webhook authentication
+**Status:** Accepted (Tigran, 2026-11-09)
+The official API spec documents custom headers on webhooks but no HMAC signing. Decision: verify
 webhooks with a shared-secret header (constant-time compare) instead of HMAC; disable `transcript`
-and `recordingUrl` payload fields.
+and `recordingUrl` payload fields. Production note: request HMAC signing from the vendor.
 
 ## ADR-012 — G0 probe is throwaway Node.js
 **Status:** Proposed
