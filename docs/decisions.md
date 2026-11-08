@@ -44,6 +44,9 @@ Switzerland — documented limitation; production alternative is Microsoft 365 i
 Waitlist rows are deleted 24 h after their last window; idempotency keys after 7 days.
 **Rejected:** SQL Server (operational weight with no benefit); storing the waitlist in calendar
 events (queries and state transitions become awkward).
+**Amendment (Tigran, 2026-11-09):** idempotency keys are no longer stored in SQLite — booking
+idempotency is provided by deterministic Google event IDs (ADR-015); an in-memory success cache was
+removed after it returned stale success (bug F1). SQLite holds only the waitlist.
 
 ## ADR-005 — Booking safety
 **Status:** Accepted
