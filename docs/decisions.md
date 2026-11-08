@@ -110,7 +110,7 @@ UI-related agents (frontend, contract sync, design) were not cloned: there is no
 **Rejected:** three minimal custom agents (first draft) — replaced to reuse a proven workflow.
 
 ## ADR-013 — Suisse Line agent configuration as code
-**Status:** Proposed (2026-11-09)
+**Status:** Accepted (Tigran, 2026-11-09)
 **Decision:** The agent's system prompt, greeting, language, timezone, tools and webhooks live in
 `agent/` in this repo and are applied with `PATCH /api/phone-agent/{id}` using the account API key
 (from `.env`). The dashboard is used for inspection only.
