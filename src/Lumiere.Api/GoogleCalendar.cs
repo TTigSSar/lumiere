@@ -10,6 +10,7 @@ namespace Lumiere.Api;
 /// <summary>
 /// Google Calendar adapter (ADR-003): service account, scope calendar.events only; events.list, events.insert with a
 /// client-supplied id (ADR-015), events.get and events.update (restore). Never deletes.
+/// The client-supplied id, the 409 path, events.get and events.update are NOT YET EXERCISED against a real calendar.
 /// </summary>
 public sealed class GoogleCalendar : ICalendar
 {
