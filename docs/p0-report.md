@@ -1,6 +1,6 @@
 # P0 — Discovery report
 
-Date: 2026-11-08 · Status: **Conditional GO — waiting for G0** (live-tool connectivity test).
+Date: 2026-11-08 · Status: **GO — G0 passed 2026-11-08** ([g0-results.md](g0-results.md)). Implementation waits for Tigran's approval of the P1 tasks.
 
 ## 1. Suisse Line capabilities
 
