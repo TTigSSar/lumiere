@@ -1,0 +1,28 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*service-account*.json
+secrets/
+
+# G0 probe captures may contain caller phone numbers
+tools/g0-probe/captures/
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+
+# Node / misc
+node_modules/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,110 @@
+# Architecture Decision Records
+
+Status values: **Accepted** (approved by Tigran) · **Proposed** (awaiting approval) ·
+**Conditional** (accepted, valid only if the named gate passes) · **Superseded**.
+
+---
+
+## ADR-001 — Full isolation from other projects
+**Status:** Accepted (2026-11-08)
+**Decision:** This project shares no infrastructure, domain, tunnel, credentials, email provider,
+repository, agent configuration or decision log with any other project of the owner.
+**Why:** It is an independent hiring submission; coupling would risk an unrelated production system
+(the candidate host was a 2 GB / 1 vCPU box already using swap) and muddy the story.
+**Rejected:** Co-hosting on the existing production VPS behind a second tunnel (zero technical impact,
+but still shared RAM/CPU and a shared DNS zone).
+
+## ADR-002 — Architecture: Suisse Line live tools → ASP.NET Core 8 → Google Calendar
+**Status:** Conditional on G0 (live tools can call an external HTTPS endpoint during a call)
+**Decision:** Suisse Line handles telephony, speech and conversation. During a call it invokes live
+tools over HTTPS on a single-instance ASP.NET Core 8 minimal API (modular monolith), which owns all
+business rules and talks to Google Calendar. No frontend.
+**Why:** The built-in calendar feature records appointment *requests* for staff to confirm; it does
+not check availability or book in real time. A small service is the minimum that delivers real
+booking, server-side rules and conflict safety.
+**Rejected:** (a) Native request capture + Zapier/Make — no real-time availability, no conflict
+prevention; kept as the G0-fail fallback. (b) Full backend + SQL Server + Angular dashboard — 2–3× the
+effort, with the extra effort going into UI rather than the parts the challenge evaluates.
+
+## ADR-003 — Google Calendar is the source of truth for appointments
+**Status:** Accepted
+**Decision:** One dedicated calendar ("Lumière Studio") in a dedicated Google account. A service
+account, shared on that calendar only with "Make changes to events", scope
+`https://www.googleapis.com/auth/calendar.events`. Availability = `events.list` (singleEvents) over the
+day; booking metadata in private extended properties (`bookingId`, `phoneHash`, `service`, `source`).
+**Why:** Staff see and edit bookings in a tool they already understand; least privilege; no second
+store to keep in sync.
+**Consequences:** No invitations to customers (no domain-wide delegation). Google stores data outside
+Switzerland — documented limitation; production alternative is Microsoft 365 in a Swiss region.
+
+## ADR-004 — SQLite only for waitlist and idempotency keys
+**Status:** Accepted
+**Decision:** One SQLite file holds `WaitlistEntry` and `IdempotencyKey`. Nothing else.
+Waitlist rows are deleted 24 h after their last window; idempotency keys after 7 days.
+**Rejected:** SQL Server (operational weight with no benefit); storing the waitlist in calendar
+events (queries and state transitions become awkward).
+
+## ADR-005 — Booking safety
+**Status:** Accepted
+**Decision:**
+- Slot IDs returned by availability are HMAC-signed (`start|service|expiry`); booking accepts only a
+  valid, unexpired signed slot and re-checks availability server-side.
+- Bookings are serialized in-process (one async lock around "re-check → insert"), valid because the
+  service runs as a single instance.
+- Idempotency key `call_id + slot_id` returns the original result on retry.
+- The assistant confirms only from a successful tool response; any error returns a `say` text that
+  never implies success.
+- **No automatic deletion of competing calendar events** as a concurrency strategy.
+**Known limitation:** an event added manually by staff in the same instant as a phone booking is not
+serialized; documented, acceptable for a single-salon MVP. Multi-instance would need a booking store
+with a unique constraint or a distributed lock.
+
+## ADR-006 — Caller identity and appointment ownership
+**Status:** Proposed — depends on G0 findings
+**Decision (preferred):** `caller_phone` and `call_id` come from Suisse Line call metadata, never from
+the LLM. A caller can list/cancel only bookings whose `phoneHash` matches; a foreign booking returns
+`NOT_FOUND`.
+**Fallback (if metadata is unavailable):** caller states their number (normalised to E.164) and the
+name must also match; documented as weaker.
+
+## ADR-007 — Additional feature: Cancellation Recovery via Telegram
+**Status:** Accepted
+**Decision:** On cancellation the backend identifies the freed slot, ranks compatible waitlist entries
+(service duration fits, inside the customer's window, earliest-joined first) and sends the salon
+staff Telegram chat the best match (first name, phone, service, slot). Staff call the customer; the
+rebooking goes through the normal booking flow. No outbound AI calls, no SMS.
+**Why:** Recovers lost revenue, demonstrable live, no paid features.
+**Rejected:** outbound AI offer call (Business plan / API access not in budget); email (more setup,
+less visible in a demo). **Privacy:** the staff chat receives the customer's phone number by
+necessity; the chat is private to staff.
+
+## ADR-008 — Hosting and delivery
+**Status:** Accepted
+**Decision:** Development on the laptop behind a temporary HTTPS tunnel. Demo on a new, dedicated
+Hetzner CX22 running one compose project (`app` + `caddy`), HTTPS via Let's Encrypt on an
+`sslip.io` hostname derived from the server IP (no domain needed). Server deleted after the interview.
+Provisioning, DNS and deploys each need explicit approval.
+
+## ADR-009 — Salon time and scheduling rules
+**Status:** Accepted
+**Decision:** Time zone `Europe/Zurich`. Hours Tue–Fri 09:00–18:30, Sat 08:30–16:00, closed Sun/Mon
+and Zürich public holidays. Service-specific durations; 10-minute buffer after each appointment;
+15-minute slot grid; no slots in the past; minimum lead time 2 h; booking horizon 30 days; at most 3
+slots offered. Single resource (one chair) in the MVP.
+
+## ADR-010 — Privacy and logging
+**Status:** Accepted
+**Decision:** Data minimisation (first/last name + phone only). Phone numbers masked in logs; no
+transcripts or recordings stored by us; call recording off in Suisse Line unless explicitly enabled
+with consent. Webhooks verified with HMAC-SHA256 and timestamp. Secrets only in env files.
+
+## ADR-011 — Agent-assisted workflow
+**Status:** Accepted
+**Decision:** Main session (planning, approvals, pushes) + `implementer` + `qa` + read-only
+`reviewer`. Agent configuration is project-local and independent.
+
+## ADR-012 — G0 probe is throwaway Node.js
+**Status:** Proposed
+**Decision:** The G0 capture endpoint is a dependency-free Node script under `tools/g0-probe/`,
+deleted after P0. It is a discovery instrument, not product code, so it does not set a precedent
+for the stack.
