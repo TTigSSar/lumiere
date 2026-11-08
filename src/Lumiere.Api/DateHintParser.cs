@@ -1,0 +1,85 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
+namespace Lumiere.Api;
+
+/// <summary>
+/// Parses the caller's English words for a day into a Zurich local date.
+/// Plain or "this &lt;weekday&gt;" = next occurrence including today; "next &lt;weekday&gt;" = strictly after today.
+/// Part-of-day words ("next thursday afternoon") are ignored here.
+/// </summary>
+public static partial class DateHintParser
+{
+    private static readonly string[] Months =
+        ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+    public static DateOnly? Parse(string? hint, DateOnly today)
+    {
+        var t = Noise().Replace((hint ?? "").ToLowerInvariant().Replace(',', ' ').Replace('.', ' '), " ");
+        t = Spaces().Replace(t, " ").Trim();
+        if (t.Length == 0) return null;
+
+        switch (t)
+        {
+            case "today": return today;
+            case "tomorrow": return today.AddDays(1);
+            case "day after tomorrow" or "the day after tomorrow": return today.AddDays(2);
+            case "next week":
+                var toMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
+                var monday = today.AddDays(toMonday == 0 ? 7 : toMonday);
+                return Salon.IsOpen(monday) ? monday : Salon.NextOpenDay(monday);
+        }
+
+        if (DateOnly.TryParseExact(t, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var iso)) return iso;
+
+        var wd = Weekday().Match(t);
+        if (wd.Success && TryDay(wd.Groups["day"].Value, out var dow))
+        {
+            var ahead = ((int)dow - (int)today.DayOfWeek + 7) % 7;
+            if (wd.Groups["mod"].Value == "next" && ahead == 0) ahead = 7;
+            return today.AddDays(ahead);
+        }
+
+        var dm = DayMonth().Match(t);
+        var md = dm.Success ? dm : MonthDay().Match(t);
+        if (md.Success && TryMonth(md.Groups["month"].Value, out var month) && int.TryParse(md.Groups["day"].Value, out var day))
+        {
+            var hasYear = int.TryParse(md.Groups["year"].Value, out var year);
+            if (!hasYear) year = today.Year;
+            if (day > DateTime.DaysInMonth(year, month)) return null;
+            var date = new DateOnly(year, month, day);
+            if (!hasYear && date < today) date = date.AddYears(1);
+            return date;
+        }
+        return null;
+    }
+
+    private static bool TryDay(string s, out DayOfWeek day)
+    {
+        foreach (var d in Enum.GetValues<DayOfWeek>())
+            if (d.ToString().ToLowerInvariant() is var name && s.Length >= 3 && name.StartsWith(s)) { day = d; return true; }
+        day = default;
+        return false;
+    }
+
+    private static bool TryMonth(string s, out int month)
+    {
+        month = Array.FindIndex(Months, m => m == s || (s.Length >= 3 && m.StartsWith(s))) + 1;
+        return month > 0;
+    }
+
+    [GeneratedRegex(@"\b(on|in|the|at|for|morning|afternoon|evening|please)\b")]
+    private static partial Regex Noise();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Spaces();
+
+    [GeneratedRegex(@"^(?:(?<mod>this|next|coming)\s+)?(?<day>[a-z]+)$")]
+    private static partial Regex Weekday();
+
+    [GeneratedRegex(@"^(?<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?<month>[a-z]+)(?:\s+(?<year>\d{4}))?$")]
+    private static partial Regex DayMonth();
+
+    [GeneratedRegex(@"^(?<month>[a-z]+)\s+(?<day>\d{1,2})(?:st|nd|rd|th)?(?:\s+(?<year>\d{4}))?$")]
+    private static partial Regex MonthDay();
+}

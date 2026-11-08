@@ -1,0 +1,30 @@
+{
+  "_comment": "SYNTHETIC fixture shaped like a G0-captured Suisse Line tool.invocation request (docs/g0-results.md). No real caller data.",
+  "event": "tool.invocation",
+  "agentId": 1000,
+  "agentName": "Synthetic Test Agent",
+  "callId": null,
+  "timestamp": "2026-11-09T07:00:00.000000",
+  "phoneNumber": "unknown",
+  "toNumber": null,
+  "startedAt": "2026-11-09T06:59:00.000000",
+  "answeredAt": "2026-11-09T06:59:01.000000",
+  "direction": "inbound",
+  "status": "in_progress",
+  "transcript": "SYNTHETIC-TRANSCRIPT-MARKER Caller: Hello, I'd like a men's cut on Tuesday morning. My name is Testy Example.",
+  "agentPrompt": "SYNTHETIC-PROMPT-MARKER You are Mia...",
+  "agentGreeting": "Good day, thank you for calling Lumière Studio.",
+  "tool": {
+    "name": "check_availability",
+    "id": "synthetic-tool-id",
+    "callId": "-1000000000.000001",
+    "arguments": {
+      "service": "men's cut",
+      "date_hint": "tuesday",
+      "part_of_day": "morning"
+    },
+    "conversation": [
+      { "role": "user", "content": "SYNTHETIC-TRANSCRIPT-MARKER I'd like a men's cut on Tuesday morning." }
+    ]
+  }
+}
