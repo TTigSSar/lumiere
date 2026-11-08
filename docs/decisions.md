@@ -109,6 +109,20 @@ general lessons were kept. The copies are independent — no shared files, hooks
 UI-related agents (frontend, contract sync, design) were not cloned: there is no frontend.
 **Rejected:** three minimal custom agents (first draft) — replaced to reuse a proven workflow.
 
+## ADR-013 — Suisse Line agent configuration as code
+**Status:** Proposed (2026-11-09)
+**Decision:** The agent's system prompt, greeting, language, timezone, tools and webhooks live in
+`agent/` in this repo and are applied with `PATCH /api/phone-agent/{id}` using the account API key
+(from `.env`). The dashboard is used for inspection only.
+**Why:** reproducible, reviewable and revertible (the platform keeps versions); prompt and backend
+salon facts change in the same commit; strong engineering story.
+**Rejected:** manual dashboard editing only (drift, no history in Git).
+
+## ADR-010 amendment (proposed 2026-11-09) — webhook authentication
+The official API spec documents custom headers on webhooks but no HMAC signing. Proposed: verify
+webhooks with a shared-secret header (constant-time compare) instead of HMAC; disable `transcript`
+and `recordingUrl` payload fields.
+
 ## ADR-012 — G0 probe is throwaway Node.js
 **Status:** Proposed
 **Decision:** The G0 capture endpoint is a dependency-free Node script under `tools/g0-probe/`,

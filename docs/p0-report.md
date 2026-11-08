@@ -12,10 +12,12 @@ Sources are public pages only; nothing below is verified inside an account yet.
 | Test number released after trial unless subscribed | VERIFIED (terms §5a.8) | suisse-line.ch/agb |
 | English agent and voice | VERIFIED (public docs) | suisse-line.ch/en |
 | Agent config: system prompt, greeting, who speaks first, knowledge base, flow builder | VERIFIED (public docs) | suisse-line.ch/plattform |
-| Live tools ("Live-Werkzeuge": queries/updates your systems during a call), Starter plan | NOT VERIFIED (advertised, undocumented) | /preise, /integrationen |
-| Tool schema, custom headers, timeout | NOT VERIFIED → G0 | — |
-| Caller number / call ID available to tools | NOT VERIFIED → G0 | — |
-| Webhooks call.started/ended/completed/forwarded, HMAC-SHA256 signed | VERIFIED (public docs); trial availability NOT VERIFIED | /integrationen |
+| Live tools: custom HTTPS endpoint, GET/POST, custom headers, typed parameters (string/number/boolean only) | **DOCUMENTED (official API spec, 2026-11-09)**; not yet exercised → G0 | [suisse-line-api-notes.md](suisse-line-api-notes.md) |
+| Tool request body shape, call metadata in tool requests, timeout, response handling | NOT VERIFIED → G0 | — |
+| Platform API key in trial | VERIFIED (dashboard offers "Generate API Key") | dashboard |
+| Agent config via API (prompt, tools, webhooks, timezone, versions/revert) | DOCUMENTED | API spec |
+| Webhooks: 10 event types incl. `tool.called`/`tool.result`, custom headers, selectable fields; test endpoint without minutes | DOCUMENTED | API spec |
+| Webhook HMAC signing | **NOT DOCUMENTED** in the API spec (marketing claim only) → use header secret | API spec |
 | Built-in calendar link | VERIFIED as request capture only ("the team confirms the appointment"); set up by vendor → REQUIRES VENDOR CONFIRMATION; not used | /blog/automatische-terminbuchung-telefon |
 | REST API / OpenAPI docs | REQUIRES VENDOR CONFIRMATION; not needed | /integrationen |
 | SMS | NOT AVAILABLE | /preise |
