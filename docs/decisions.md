@@ -132,6 +132,27 @@ salon facts change in the same commit; strong engineering story.
    conversation, system prompt) is never logged or stored.
 **Evidence:** [g0-results.md](g0-results.md).
 
+## ADR-015 — Deterministic calendar event IDs (booking idempotency at the calendar)
+**Status:** Accepted (Tigran, 2026-11-09)
+**Context:** live verification showed a cold first `events.insert` exceeding the 3 s budget: the caller
+heard "not booked" while Google created the event, and the retry created a duplicate (confirmed bug).
+**Decision:** each booking's Google event ID is derived deterministically from
+`start + service + normalised phone` (HMAC with the server key, base32hex as Google requires).
+A second insert of the same booking gets 409 from Google and is treated as the existing booking.
+After an insert timeout the service looks the event up by that ID before answering. A previously
+cancelled event with the same ID is restored, not re-created. Timeout budget unchanged (3 s);
+no warm-up (option C not chosen).
+**Rejected:** (A) list-after-timeout only — race window remains; (C) longer timeout + warm-up — does
+not prevent duplicates on its own.
+**Regression test:** required (QA verdict) — fake calendar whose insert completes after the timeout.
+
+## ADR-016 — Calendar event semantics and extra error codes
+**Status:** Accepted (Tigran, 2026-11-09)
+- Events marked "Free" (transparent) never block time; opaque all-day events block the whole day;
+  timed opaque events block their time plus the 10-minute buffer.
+- Additional business codes (HTTP 200, `ok:false`, ADR-014): `DATE_IN_PAST`, `BEYOND_HORIZON`,
+  `INVALID_NAME`, `NO_AVAILABILITY`.
+
 ## ADR-010 amendment — webhook authentication
 **Status:** Accepted (Tigran, 2026-11-09)
 The official API spec documents custom headers on webhooks but no HMAC signing. Decision: verify
