@@ -209,3 +209,8 @@ for the stack.
 7. **No false promises in the prompt (m-8).** The assistant does not promise to "take a message";
    for anything outside its tools it asks the caller to call during opening hours.
 8. **Known limitations** (documented, not fixed): see `docs/limitations.md`.
+
+**ADR-018 implementation notes (2026-11-09, flagged to Tigran):**
+- New business code `INTERNAL` (HTTP 200, `ok:false`, neutral say) for unexpected exceptions — completes item 4/5.
+- `my-appointments`/`cancel` return `IDENTITY_REQUIRED` (not `PHONE_REQUIRED`) when no metadata identity exists.
+- Day-month without a year: up to 30 days in the past → `DATE_IN_PAST`; older → next year.
