@@ -23,6 +23,9 @@ builder.Services.AddSingleton<ICalendar>(sp =>
     var (calendarId, keyPath) = (config["GOOGLE_CALENDAR_ID"], config["GOOGLE_SERVICE_ACCOUNT_KEY_PATH"]);
     if (!string.IsNullOrWhiteSpace(calendarId) && !string.IsNullOrWhiteSpace(keyPath))
         return new GoogleCalendar(calendarId, keyPath);
+    // The in-memory calendar exists only in Development (and tests, which register their own) — ADR-018 C-1.
+    if (!sp.GetRequiredService<IHostEnvironment>().IsDevelopment())
+        throw new InvalidOperationException("GOOGLE_CALENDAR_ID and GOOGLE_SERVICE_ACCOUNT_KEY_PATH are required");
     sp.GetRequiredService<ILogger<Program>>().LogWarning(
         "GOOGLE_CALENDAR_ID / GOOGLE_SERVICE_ACCOUNT_KEY_PATH not set: using the in-memory calendar (bookings are not persisted)");
     return new InMemoryCalendar();
@@ -77,7 +80,13 @@ if (string.IsNullOrEmpty(app.Configuration["TOOL_SHARED_SECRET"]))
 app.Services.GetRequiredService<BookingService>();
 app.Services.GetRequiredService<CancellationRecovery>();
 
-app.MapGet("/health", () => Results.Json(new { ok = true }));
+// Modes only, never configuration values (ADR-018 C-1).
+app.MapGet("/health", (ICalendar calendar, IStaffNotifier notifier) => Results.Json(new
+{
+    ok = true,
+    calendar = calendar is GoogleCalendar ? "google" : "in-memory",
+    notifier = notifier is TelegramNotifier ? "telegram" : "log",
+}));
 app.MapToolEndpoints();
 
 app.Run();

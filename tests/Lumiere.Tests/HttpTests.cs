@@ -63,7 +63,12 @@ public sealed class HttpTests : IDisposable
     {
         var res = await _client.GetAsync("/health");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
-        Assert.True((await Json(res)).GetProperty("ok").GetBoolean());
+        var json = await Json(res);
+        Assert.True(json.GetProperty("ok").GetBoolean());
+        // Modes only (ADR-018 C-1); never configuration values.
+        Assert.Equal("in-memory", json.GetProperty("calendar").GetString());
+        Assert.Equal("log", json.GetProperty("notifier").GetString());
+        Assert.Equal(["ok", "calendar", "notifier"], json.EnumerateObject().Select(p => p.Name));
     }
 
     [Theory]

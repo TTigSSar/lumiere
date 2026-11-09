@@ -23,7 +23,7 @@ public static class ToolEndpoints
                 booking.BookAsync(a.GetValueOrDefault("slot_id"), a.GetValueOrDefault("first_name"), a.GetValueOrDefault("last_name"), callerPhone, ct)));
 
         app.MapPost("/tools/my-appointments", (HttpContext http, BookingService booking) =>
-            Handle(http, "my-appointments", (_, callerPhone, ct) => booking.MyAppointmentsAsync(callerPhone, ct)));
+            Handle(http, "my-appointments", (_, callerPhone, ct) => booking.MyAppointmentsAsync(callerPhone, ct), requireMetadataIdentity: true));
 
         app.MapPost("/tools/cancel", (HttpContext http, BookingService booking, CancellationRecovery recovery) =>
             Handle(http, "cancel", async (a, callerPhone, ct) =>
@@ -32,7 +32,7 @@ public static class ToolEndpoints
                 // The response is decided; recovery runs in the background and can never change it (ADR-007).
                 if (outcome.Freed is { } freed) recovery.Trigger(freed);
                 return outcome.Result;
-            }));
+            }, requireMetadataIdentity: true));
 
         app.MapPost("/tools/join-waitlist", (HttpContext http, WaitlistService waitlist) =>
             Handle(http, "join-waitlist", (a, callerPhone, _) => Task.FromResult(waitlist.Join(
@@ -40,8 +40,18 @@ public static class ToolEndpoints
                 a.GetValueOrDefault("first_name"), callerPhone))));
     }
 
+    /// <summary>List/cancel without a call-metadata caller number (ADR-018 M-1): a spoken number is not proof of ownership.</summary>
+    public static readonly ToolResult IdentityRequired = ToolResult.Fail("IDENTITY_REQUIRED",
+        "For your security I can only look up or cancel appointments when you call from the phone number used for the booking.");
+
+    /// <summary>Any unexpected exception (ADR-018 m-5: no input may produce HTTP 500).</summary>
+    public static readonly ToolResult Internal = ToolResult.Fail("INTERNAL",
+        "Sorry, something went wrong on my side. Could you say that again?");
+
+    /// <param name="requireMetadataIdentity">True for my-appointments and cancel: only a caller number from call metadata
+    /// is accepted (ADR-018 M-1); a spoken or missing number gives IDENTITY_REQUIRED.</param>
     private static async Task<IResult> Handle(HttpContext http, string endpoint,
-        Func<IReadOnlyDictionary<string, string>, string?, CancellationToken, Task<ToolResult>> run)
+        Func<IReadOnlyDictionary<string, string>, string?, CancellationToken, Task<ToolResult>> run, bool requireMetadataIdentity = false)
     {
         var started = Stopwatch.GetTimestamp();
         var log = http.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Lumiere.Tools");
@@ -53,16 +63,30 @@ public static class ToolEndpoints
             return Results.StatusCode(StatusCodes.Status401Unauthorized);
         }
 
-        var request = await ReadRequestAsync(http.Request, ct);
-        if (request is not { } parsed)
+        string? callerPhone = null;
+        var source = "none";
+        ToolResult result;
+        try
         {
-            log.LogWarning("tool {Endpoint} -> 400", endpoint);
-            return Results.BadRequest(new { ok = false, error_code = "BAD_REQUEST" });
-        }
+            var request = await ReadRequestAsync(http.Request, ct);
+            if (request is not { } parsed)
+            {
+                log.LogWarning("tool {Endpoint} -> 400", endpoint);
+                return Results.BadRequest(new { ok = false, error_code = "BAD_REQUEST" });
+            }
 
-        var (args, metadataPhone) = parsed;
-        var (callerPhone, source) = Caller.Resolve(metadataPhone, args.GetValueOrDefault("caller_phone"));
-        var result = await run(args, callerPhone, ct);
+            var (args, metadataPhone) = parsed;
+            (callerPhone, source) = Caller.Resolve(metadataPhone, args.GetValueOrDefault("caller_phone"));
+            result = requireMetadataIdentity && source != "metadata"
+                ? IdentityRequired
+                : await run(args, callerPhone, ct);
+        }
+        catch (Exception ex)
+        {
+            // Type only: an exception message may carry caller data (ADR-010).
+            log.LogError("tool {Endpoint} -> INTERNAL ({ExceptionType})", endpoint, ex.GetType().Name);
+            result = Internal;
+        }
         log.LogInformation("tool {Endpoint} -> {Outcome} in {LatencyMs} ms, phone {Phone} source={PhoneSource}", endpoint, result.ErrorCode ?? "OK",
             (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, Caller.MaskPhone(callerPhone), source);
         return Results.Json(result);

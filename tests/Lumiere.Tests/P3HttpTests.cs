@@ -104,13 +104,84 @@ public sealed class P3HttpTests : IDisposable
         Assert.Equal(mine, a.GetProperty("booking_id").GetString());
         Assert.Equal("men's cut on Tuesday, 10 November at 12:00", a.GetProperty("spoken_label").GetString());
 
-        var none = await Call("/tools/my-appointments", new JsonObject { ["caller_phone"] = "079 000 00 09" }, null);
+        var none = await Call("/tools/my-appointments", new JsonObject(), "+41790000009");
         Assert.True(none.GetProperty("ok").GetBoolean());
         Assert.Equal(0, none.GetProperty("appointments").GetArrayLength());
         Assert.Equal("I can't find any upcoming appointments for this number.", none.GetProperty("say").GetString());
 
+        // No call-metadata number at all: not PHONE_REQUIRED — a spoken number would not be accepted either (ADR-018 M-1).
         var noPhone = await Call("/tools/my-appointments", new JsonObject(), null);
-        Assert.Equal("PHONE_REQUIRED", noPhone.GetProperty("error_code").GetString());
+        Assert.Equal("IDENTITY_REQUIRED", noPhone.GetProperty("error_code").GetString());
+    }
+
+    private const string IdentityRequiredSay =
+        "For your security I can only look up or cancel appointments when you call from the phone number used for the booking.";
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("Browser Test")]
+    [InlineData("")]
+    [InlineData(null)]
+    public async Task Spoken_victim_number_without_call_metadata_cannot_list_or_cancel(string? metadataPhone)
+    {
+        var victimBooking = await Book(Zurich(2026, 11, 11, 9, 0), Theirs);
+        await JoinWaitlist(Mine);
+
+        var post = (string path, JsonObject args) =>
+        {
+            var b = JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "tool-invocation.synthetic.json")))!.AsObject();
+            if (metadataPhone is null) b.Remove("phoneNumber"); else b["phoneNumber"] = metadataPhone;
+            b["tool"]!["arguments"] = args;
+            var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(b.ToJsonString(), Encoding.UTF8, "application/json") };
+            req.Headers.Add("X-Tool-Secret", Secret);
+            return _client.SendAsync(req);
+        };
+
+        var listRes = await post("/tools/my-appointments", new JsonObject { ["caller_phone"] = "079 000 00 02" });
+        var cancelRes = await post("/tools/cancel", new JsonObject { ["booking_id"] = victimBooking, ["caller_phone"] = "079 000 00 02" });
+        await Recovery.WhenIdleAsync();
+
+        foreach (var res in new[] { listRes, cancelRes })
+        {
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            var raw = await res.Content.ReadAsStringAsync();
+            var json = JsonDocument.Parse(raw).RootElement;
+            Assert.Equal(("IDENTITY_REQUIRED", false), (json.GetProperty("error_code").GetString(), json.GetProperty("ok").GetBoolean()));
+            Assert.Equal(IdentityRequiredSay, json.GetProperty("say").GetString());
+            Assert.False(json.TryGetProperty("appointments", out _));
+            Assert.False(json.TryGetProperty("cancelled", out _));
+            Assert.DoesNotContain(victimBooking, raw);
+            Assert.DoesNotContain("November", raw);
+        }
+        Assert.False(_calendar.AllEvents.Single(e => e.Id == victimBooking).Cancelled);
+        Assert.Empty(_telegram.Requests);
+        Assert.Contains("tool cancel -> IDENTITY_REQUIRED", string.Join("\n", _logs.Lines));
+    }
+
+    [Fact]
+    public async Task Spoken_number_still_books_and_joins_the_waitlist()
+    {
+        var ids = _factory.Services.GetRequiredService<SlotIds>();
+        var book = await Call("/tools/book", new JsonObject
+        {
+            ["slot_id"] = ids.Create(Zurich(2026, 11, 10, 12, 0), "mens_cut"), ["first_name"] = "Testy", ["last_name"] = "Example",
+            ["caller_phone"] = "079 000 00 02",
+        }, "unknown");
+        var join = await Call("/tools/join-waitlist", new JsonObject
+        {
+            ["service"] = "men's cut", ["preferred_days"] = "Wednesday", ["first_name"] = "Anna", ["caller_phone"] = "079 000 00 02",
+        }, "Browser Test");
+
+        Assert.True(book.GetProperty("ok").GetBoolean());
+        Assert.True(join.GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Health_reports_the_telegram_notifier()
+    {
+        var json = JsonDocument.Parse(await _client.GetStringAsync("/health")).RootElement;
+        Assert.Equal("telegram", json.GetProperty("notifier").GetString());
+        Assert.Equal("in-memory", json.GetProperty("calendar").GetString());
     }
 
     [Fact]
@@ -150,7 +221,7 @@ public sealed class P3HttpTests : IDisposable
         var id = await Book(Zurich(2026, 11, 11, 9, 0), Theirs);
         await JoinWaitlist(Mine);
 
-        var r = await Call("/tools/cancel", new JsonObject { ["booking_id"] = id, ["caller_phone"] = "079 000 00 01" }, null);
+        var r = await Call("/tools/cancel", new JsonObject { ["booking_id"] = id }, Mine);
         await Recovery.WhenIdleAsync();
 
         Assert.Equal(("NOT_FOUND", false), (r.GetProperty("error_code").GetString(), r.GetProperty("ok").GetBoolean()));
