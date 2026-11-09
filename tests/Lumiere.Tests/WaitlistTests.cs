@@ -40,6 +40,14 @@ public class WaitlistTests : IDisposable
     [InlineData("12 November", "Thursday, 12 November", "11-12")]
     [InlineData("12 November or 14 November", "Thursday, 12 November or Saturday, 14 November", "11-12,11-14")]
     [InlineData("Thursday 12 November", "Thursday, 12 November", "11-12")]
+    [InlineData("Thursday, 12 November", "Thursday, 12 November", "11-12")]
+    [InlineData("Thursday the 12th of November", "Thursday, 12 November", "11-12")]
+    [InlineData("Thursday November 12", "Thursday, 12 November", "11-12")]
+    [InlineData("Thu 12 Nov", "Thursday, 12 November", "11-12")]
+    [InlineData("Thurs, Nov 12th", "Thursday, 12 November", "11-12")]
+    [InlineData("12 November afternoon", "Thursday, 12 November", "11-12")]
+    [InlineData("Thursday 12 November in the morning", "Thursday, 12 November", "11-12")]
+    [InlineData("Friday 12 November", "Thursday, 12 November", "11-12")] // stated weekday wrong: the date decides
     [InlineData("tomorrow", "Tuesday, 10 November", "11-10")]
     public void Preferred_days_parse_to_open_dates_within_two_weeks(string words, string description, string dates)
     {

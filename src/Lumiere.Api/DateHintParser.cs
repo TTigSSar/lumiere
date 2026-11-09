@@ -8,16 +8,36 @@ namespace Lumiere.Api;
 /// Plain or "this &lt;weekday&gt;" = next occurrence including today; "next &lt;weekday&gt;" = strictly after today;
 /// "last &lt;weekday&gt;", "yesterday" etc. = past dates (rejected later as DATE_IN_PAST).
 /// Part-of-day words ("next thursday afternoon") are ignored here.
+/// A weekday stated with a date ("Thursday 12 November", "Thu, Nov 12") is accepted; the date decides, and
+/// <see cref="Interpret"/> reports a stated weekday that does not match the date.
 /// </summary>
 public static partial class DateHintParser
 {
     private static readonly string[] Months =
         ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
-    public static DateOnly? Parse(string? hint, DateOnly today)
+    /// <summary>The parsed date (null = unclear) and, when the caller stated a weekday that the date does not fall on, that weekday.</summary>
+    public readonly record struct Result(DateOnly? Date, DayOfWeek? MismatchedWeekday);
+
+    /// <summary>The date the hint names; with a weekday + date, the date decides.</summary>
+    public static DateOnly? Parse(string? hint, DateOnly today) => Interpret(hint, today).Date;
+
+    public static Result Interpret(string? hint, DateOnly today)
     {
         var t = Noise().Replace((hint ?? "").ToLowerInvariant().Replace(',', ' ').Replace('.', ' '), " ");
         t = Spaces().Replace(t, " ").Trim();
+        if (ParseNormalized(t, today) is { } date) return new(date, null);
+
+        // "Thursday 12 November", "next Thu Nov 12": an optional leading weekday with an explicit date.
+        var lead = LeadingWeekday().Match(t);
+        if (lead.Success && TryDay(lead.Groups["day"].Value, out var stated)
+            && ExplicitDate(lead.Groups["rest"].Value, today) is { } explicitDate)
+            return new(explicitDate, explicitDate.DayOfWeek == stated ? null : stated);
+        return new(null, null);
+    }
+
+    private static DateOnly? ParseNormalized(string t, DateOnly today)
+    {
         if (t.Length == 0) return null;
 
         switch (t)
@@ -46,6 +66,12 @@ public static partial class DateHintParser
             return today.AddDays(ahead);
         }
 
+        return ExplicitDate(t, today);
+    }
+
+    /// <summary>"12 November", "Nov 12th 2026", "12th of Nov".</summary>
+    private static DateOnly? ExplicitDate(string t, DateOnly today)
+    {
         var dm = DayMonth().Match(t);
         var md = dm.Success ? dm : MonthDay().Match(t);
         if (md.Success && TryMonth(md.Groups["month"].Value, out var month) && int.TryParse(md.Groups["day"].Value, out var day))
@@ -82,6 +108,9 @@ public static partial class DateHintParser
 
     [GeneratedRegex(@"^(?:(?<mod>this|next|coming|last)\s+)?(?<day>[a-z]+)$")]
     private static partial Regex Weekday();
+
+    [GeneratedRegex(@"^(?:(?:this|next|coming)\s+)?(?<day>[a-z]+)\s+(?<rest>.+)$")]
+    private static partial Regex LeadingWeekday();
 
     [GeneratedRegex(@"^(?<day>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?<month>[a-z]+)(?:\s+(?<year>\d{4}))?$")]
     private static partial Regex DayMonth();

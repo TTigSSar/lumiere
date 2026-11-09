@@ -51,6 +51,27 @@ public class BookingServiceTests
         Assert.False(string.IsNullOrWhiteSpace(r.Say));
     }
 
+    [Theory]
+    [InlineData("Thursday 12 November")]
+    [InlineData("Thu, Nov 12th")]
+    [InlineData("Thursday the 12th of November")]
+    public async Task Weekday_with_matching_date_offers_slots_on_that_date(string hint)
+    {
+        var (svc, _, _, _) = Booking();
+        var r = await svc.CheckAvailabilityAsync("men's cut", hint, null, default);
+        Assert.True(r.Ok);
+        Assert.StartsWith("Thursday, 12 November", r.Slots![0].SpokenLabel);
+    }
+
+    [Fact]
+    public async Task Weekday_that_does_not_match_the_date_is_DATE_MISMATCH()
+    {
+        var (svc, _, _, _) = Booking();
+        var r = await svc.CheckAvailabilityAsync("men's cut", "Friday 12 November", null, default);
+        Assert.Equal(("DATE_MISMATCH", false), (r.ErrorCode, r.Ok));
+        Assert.Equal("12 November is a Thursday — did you mean Thursday, 12 November, or a different day?", r.Say);
+    }
+
     [Fact]
     public async Task Full_day_returns_alternatives_from_following_days()
     {

@@ -53,7 +53,7 @@ All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by s
 
 | Endpoint | Input | Output | Errors | Idempotency |
 |---|---|---|---|---|
-| `POST /tools/check-availability` | `service`, `date_hint`, `part_of_day?` | `today`, ≤ 3 `{slot_id, spoken_label}` | `UNKNOWN_SERVICE`, `CLOSED` (+ next open day), `CALENDAR_UNAVAILABLE` | read-only |
+| `POST /tools/check-availability` | `service`, `date_hint`, `part_of_day?` | `today`, ≤ 3 `{slot_id, spoken_label}` | `UNKNOWN_SERVICE`, `CLOSED` (+ next open day), `DATE_MISMATCH` (stated weekday ≠ the date, e.g. "Friday 12 November" → "12 November is a Thursday — did you mean Thursday, 12 November, or a different day?"), `CALENDAR_UNAVAILABLE` | read-only |
 | `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone?`² | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | `slot_id + caller phone` |
 | `POST /tools/my-appointments` | `caller_phone?`² | ≤ 3 future confirmed own bookings `appointments: [{booking_id, spoken_label}]` (e.g. "men's cut on Tuesday, 10 November at 12:00"); none → `ok:true`, empty list | `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | read-only |
 | `POST /tools/cancel` | `booking_id`, `caller_phone?`² | `booking_id`, `cancelled: true` | `NOT_FOUND` (missing, foreign, past or not an AI booking — indistinguishable), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | repeat-safe: an own already-cancelled booking returns the same success; recovery fires only for the call that cancelled |

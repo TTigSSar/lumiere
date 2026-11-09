@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -58,8 +59,15 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         var part = PartOfDayParser.Parse(partOfDay);
         if (part == PartOfDay.Any) part = PartOfDayParser.Parse(dateHint);
 
-        if (DateHintParser.Parse(dateHint, today) is not { } date)
+        var hint = DateHintParser.Interpret(dateHint, today);
+        if (hint.Date is not { } date)
             return ToolResult.Fail("DATE_UNCLEAR", "Which day would suit you?");
+        if (hint.MismatchedWeekday is not null)
+        {
+            var dayMonth = date.ToString("d MMMM", CultureInfo.InvariantCulture);
+            return ToolResult.Fail("DATE_MISMATCH",
+                $"{dayMonth} is a {date.DayOfWeek} — did you mean {Salon.SpokenDay(date)}, or a different day?");
+        }
         if (date < today)
             return ToolResult.Fail("DATE_IN_PAST", $"That day has already passed. Today is {Salon.SpokenToday(today)}. Which day would suit you?");
         var lastDay = today.AddDays(Salon.HorizonDays);
