@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,9 +33,15 @@ public sealed record ToolResult
     public static ToolResult Fail(string code, string say) => new() { Ok = false, ErrorCode = code, Say = say };
 }
 
-public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotIds slotIds, byte[] phoneHashKey)
+/// <param name="requestBudget">Total deadline per tool request (ADR-018 M-2); <see cref="RequestBudget"/> unless a test overrides it.</param>
+/// <param name="bookingLock">The booking lock; the process-wide one unless a test supplies its own (to hold it without blocking other tests).</param>
+public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotIds slotIds, byte[] phoneHashKey,
+    TimeSpan? requestBudget = null, SemaphoreSlim? bookingLock = null)
 {
     public static readonly TimeSpan CalendarTimeout = TimeSpan.FromSeconds(3);
+    /// <summary>Total budget of one tool request across all calendar calls, including the wait for the booking lock (ADR-018 M-2).</summary>
+    public static readonly TimeSpan RequestBudget = TimeSpan.FromSeconds(7);
+    private readonly TimeSpan _requestBudget = requestBudget ?? RequestBudget;
     /// <summary>Budget for the single lookup after a failed or timed-out insert (ADR-015).</summary>
     public static readonly TimeSpan LookupTimeout = TimeSpan.FromSeconds(1.5);
     private const int AlternativeDays = 7;
@@ -42,7 +49,8 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
     // Bookings are serialized process-wide; valid because the service runs as a single instance (ADR-005).
     // No in-process success cache: the deterministic event id + get-by-id is the idempotency mechanism (ADR-015),
     // so a repeat after a cancellation in Google is restored instead of answered from memory.
-    private static readonly SemaphoreSlim BookingLock = new(1, 1);
+    private static readonly SemaphoreSlim ProcessBookingLock = new(1, 1);
+    private readonly SemaphoreSlim _bookingLock = bookingLock ?? ProcessBookingLock;
 
     private static ToolResult CalendarUnavailable(bool booking) => ToolResult.Fail("CALENDAR_UNAVAILABLE", booking
         ? "Sorry, I can't reach our calendar right now, so the appointment is not booked. Shall I try again in a moment?"
@@ -76,8 +84,9 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         if (!Salon.IsOpen(date))
             return ToolResult.Fail("CLOSED", $"We're closed on {Salon.SpokenDay(date)}. The next open day is {Salon.SpokenDay(Salon.NextOpenDay(date))}. Would that suit you?");
 
+        var deadline = NewDeadline();
         IReadOnlyList<CalendarEvent> busy;
-        try { busy = await ListBusyAsync(date, date.AddDays(AlternativeDays), ct); }
+        try { busy = await ListBusyAsync(date, date.AddDays(AlternativeDays), deadline, ct); }
         catch (Exception) { return CalendarUnavailable(booking: false); }
 
         var todayLabel = Salon.SpokenToday(today);
@@ -118,7 +127,8 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         // It doubles as the booking id, so a retry returns the same booking_id.
         var eventId = EventIds.For(startUtc, service.Key, phone, phoneHashKey);
 
-        await BookingLock.WaitAsync(ct);
+        var deadline = NewDeadline();
+        if (!await EnterLockAsync(deadline, ct)) return CalendarUnavailable(booking: true);
         try
         {
             ToolResult Booked()
@@ -128,18 +138,18 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
             }
 
             CalendarEvent? existing;
-            try { existing = await WithTimeout(t => calendar.GetAsync(eventId, t), ct); }
+            try { existing = await WithTimeout(t => calendar.GetAsync(eventId, t), deadline, ct); }
             catch (Exception) { return CalendarUnavailable(booking: true); }
             if (existing is { Cancelled: false }) return Booked();
 
             var now = clock.GetUtcNow();
             IReadOnlyList<CalendarEvent> busy;
-            try { busy = await WithTimeout(t => calendar.ListAsync(startUtc - Salon.Buffer, endUtc + Salon.Buffer, t), ct); }
+            try { busy = await WithTimeout(t => calendar.ListAsync(startUtc - Salon.Buffer, endUtc + Salon.Buffer, t), deadline, ct); }
             catch (Exception) { return CalendarUnavailable(booking: true); }
 
             // The booking's own event (same id) never blocks its own slot.
             if (!Scheduler.Fits(startUtc, service, now, busy.Where(e => e.Id != eventId).ToList()))
-                return await SlotTakenAsync(startUtc, service, now, ct);
+                return await SlotTakenAsync(startUtc, service, now, deadline, ct);
 
             var ev = new CalendarEvent(eventId, startUtc, endUtc,
                 $"{char.ToUpperInvariant(service.SpokenName[0])}{service.SpokenName[1..]} — {first} {char.ToUpperInvariant(last[0])}.",
@@ -154,21 +164,22 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
 
             try
             {
+                // No write is started once the request budget is spent (ADR-018 M-2): WithTimeout throws before calling.
                 if (existing is { Cancelled: true })
-                    await WithTimeout(async t => { await calendar.RestoreAsync(ev, t); return true; }, ct);
+                    await WithTimeout(async t => { await calendar.RestoreAsync(ev, t); return true; }, deadline, ct);
                 else
-                    await WithTimeout(t => calendar.InsertAsync(ev, t), ct);
+                    await WithTimeout(t => calendar.InsertAsync(ev, t), deadline, ct);
                 return Booked();
             }
             catch (Exception)
             {
                 // Conflict (already exists), timeout or error: the event may exist anyway — look once before answering.
-                return await ExistsConfirmedAsync(eventId, ct) ? Booked() : CalendarUnavailable(booking: true);
+                return await ExistsConfirmedAsync(eventId, deadline, ct) ? Booked() : CalendarUnavailable(booking: true);
             }
         }
         finally
         {
-            BookingLock.Release();
+            _bookingLock.Release();
         }
     }
 
@@ -186,7 +197,7 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         if (Caller.NormalisePhone(callerPhone) is not { } phone) return PhoneRequired;
         var now = clock.GetUtcNow();
         IReadOnlyList<CalendarEvent> events;
-        try { events = await WithTimeout(t => calendar.ListByPhoneHashAsync(Caller.PhoneHash(phone, phoneHashKey), now, t), ct); }
+        try { events = await WithTimeout(t => calendar.ListByPhoneHashAsync(Caller.PhoneHash(phone, phoneHashKey), now, t), NewDeadline(), ct); }
         catch (Exception) { return CalendarUnavailable(booking: false); }
 
         var own = events
@@ -215,11 +226,12 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         var id = (bookingId ?? "").Trim();
         if (id.Length == 0 || id.Length > 1024) return new(BookingNotFound, null);
 
-        await BookingLock.WaitAsync(ct);
+        var deadline = NewDeadline();
+        if (!await EnterLockAsync(deadline, ct)) return new(CalendarUnavailable(booking: false), null);
         try
         {
             CalendarEvent? ev;
-            try { ev = await WithTimeout(t => calendar.GetAsync(id, t), ct); }
+            try { ev = await WithTimeout(t => calendar.GetAsync(id, t), deadline, ct); }
             catch (Exception) { return new(CalendarUnavailable(booking: false), null); }
 
             var now = clock.GetUtcNow();
@@ -232,13 +244,13 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
 
             try
             {
-                await WithTimeout(async t => { await calendar.CancelAsync(id, t); return true; }, ct);
+                await WithTimeout(async t => { await calendar.CancelAsync(id, t); return true; }, deadline, ct);
             }
             catch (Exception)
             {
                 // Timeout or error: Google may have cancelled it anyway — look once before answering.
                 CalendarEvent? after;
-                try { after = await WithTimeout(t => calendar.GetAsync(id, t), ct, LookupTimeout); }
+                try { after = await WithTimeout(t => calendar.GetAsync(id, t), deadline, ct, LookupTimeout); }
                 catch (Exception) { after = null; }
                 if (after is not { Cancelled: true })
                     return new(ToolResult.Fail("CALENDAR_UNAVAILABLE",
@@ -248,7 +260,7 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         }
         finally
         {
-            BookingLock.Release();
+            _bookingLock.Release();
         }
     }
 
@@ -269,19 +281,19 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
     }
 
     /// <summary>One get-by-id with its own short budget; false when missing, cancelled or unreachable.</summary>
-    private async Task<bool> ExistsConfirmedAsync(string eventId, CancellationToken ct)
+    private async Task<bool> ExistsConfirmedAsync(string eventId, Deadline deadline, CancellationToken ct)
     {
-        try { return await WithTimeout(t => calendar.GetAsync(eventId, t), ct, LookupTimeout) is { Cancelled: false }; }
+        try { return await WithTimeout(t => calendar.GetAsync(eventId, t), deadline, ct, LookupTimeout) is { Cancelled: false }; }
         catch (Exception) { return false; }
     }
 
-    private async Task<ToolResult> SlotTakenAsync(DateTimeOffset startUtc, Service service, DateTimeOffset now, CancellationToken ct)
+    private async Task<ToolResult> SlotTakenAsync(DateTimeOffset startUtc, Service service, DateTimeOffset now, Deadline deadline, CancellationToken ct)
     {
         const string taken = "Sorry, that time has just been taken.";
         var date = Salon.LocalDate(startUtc);
         try
         {
-            var busy = await ListBusyAsync(date, date.AddDays(AlternativeDays), ct);
+            var busy = await ListBusyAsync(date, date.AddDays(AlternativeDays), deadline, ct);
             var free = Enumerable.Range(0, AlternativeDays + 1)
                 .SelectMany(i => Scheduler.FreeStarts(date.AddDays(i), service, PartOfDay.Any, now, busy)).ToList();
             var alternatives = ToSlots(Scheduler.Nearest(free, startUtc, 2), service);
@@ -295,15 +307,36 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         }
     }
 
-    private Task<IReadOnlyList<CalendarEvent>> ListBusyAsync(DateOnly from, DateOnly toInclusive, CancellationToken ct) =>
+    private Task<IReadOnlyList<CalendarEvent>> ListBusyAsync(DateOnly from, DateOnly toInclusive, Deadline deadline, CancellationToken ct) =>
         WithTimeout(t => calendar.ListAsync(
             Salon.ToUtc(from, TimeOnly.MinValue) - Salon.Buffer,
-            Salon.ToUtc(toInclusive.AddDays(1), TimeOnly.MinValue) + Salon.Buffer, t), ct);
+            Salon.ToUtc(toInclusive.AddDays(1), TimeOnly.MinValue) + Salon.Buffer, t), deadline, ct);
 
-    /// <summary>Runs a calendar call with the 3 s budget (or <paramref name="budget"/>); throws on timeout or failure.</summary>
-    private static async Task<T> WithTimeout<T>(Func<CancellationToken, Task<T>> call, CancellationToken ct, TimeSpan? budget = null)
+    /// <summary>The request's total deadline (wall time, like the per-call caps — not the injected clock).</summary>
+    private Deadline NewDeadline() => new(Stopwatch.GetTimestamp(), _requestBudget);
+
+    private readonly record struct Deadline(long StartedTimestamp, TimeSpan Budget)
     {
-        var limit = budget ?? CalendarTimeout;
+        public TimeSpan Remaining => Budget - Stopwatch.GetElapsedTime(StartedTimestamp);
+    }
+
+    /// <summary>Waits for the booking lock within the remaining request budget; false when the budget ran out first.</summary>
+    private async Task<bool> EnterLockAsync(Deadline deadline, CancellationToken ct)
+    {
+        var remaining = deadline.Remaining;
+        return remaining > TimeSpan.Zero && await _bookingLock.WaitAsync(remaining, ct);
+    }
+
+    /// <summary>
+    /// Runs a calendar call capped at 3 s (or <paramref name="cap"/>) and never beyond the request's remaining budget;
+    /// throws on timeout or failure. When the budget is already spent the call is not started at all.
+    /// </summary>
+    private static async Task<T> WithTimeout<T>(Func<CancellationToken, Task<T>> call, Deadline deadline, CancellationToken ct, TimeSpan? cap = null)
+    {
+        var remaining = deadline.Remaining;
+        if (remaining <= TimeSpan.Zero) throw new TimeoutException("request budget exhausted");
+        var limit = cap ?? CalendarTimeout;
+        if (remaining < limit) limit = remaining;
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(limit);
         return await call(cts.Token).WaitAsync(limit, ct);
