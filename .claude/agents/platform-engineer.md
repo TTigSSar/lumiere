@@ -31,7 +31,8 @@ You own the demo infrastructure. backend-dev builds the application; you package
 
 ## Host facts (fill in at provisioning; do not re-derive)
 
-- **Server:** `178.104.181.220`, Hetzner Cloud project `lumiere-demo` (nothing else in it), Falkenstein, x86, 2 GB RAM, 40 GB disk (Hetzner console, per Tigran). Ubuntu 24.04 assumed by `bootstrap.sh`. vCPU count, kernel, swap and Docker presence: **not yet inspected** — SSH with the Lumière key was refused on 2026-11-09 (key `SHA256:raU3xnahAV7lczGdFqiSN7sbQVFLJkpvhDjlo5nEia4` not in the server's `authorized_keys`). Fill in after the first successful login.
+- **Server:** `178.104.181.220`, Hetzner Cloud project `lumiere-demo` (nothing else in it), Falkenstein, x86, Hetzner type CPX12 (ADR-008 amendment). Inspected 2026-11-09: hostname `lumiere-demo`, Ubuntu 24.04.4 LTS, kernel 6.8.0-138-generic, 1 vCPU, 1.9 GiB RAM, 38 GB root disk, clock UTC (NTP synced). Before bootstrap: no swap, no Docker, only sshd (22) + systemd-resolved (127.0.0.53) listening, no `/opt/dorent`. `authorized_keys` holds only the Lumière key (`SHA256:raU3xnahAV7lczGdFqiSN7sbQVFLJkpvhDjlo5nEia4`, added by Tigran via password login).
+- **sshd hardening:** `bootstrap.sh` writes `/etc/ssh/sshd_config.d/10-lumiere.conf` (password + keyboard-interactive off, root key-only); it sorts before cloud-init's `50-cloud-init.conf` (`PasswordAuthentication yes`), and sshd keeps the first value it reads, so ours wins.
 - **Hostname:** `178-104-181-220.sslip.io` (Let's Encrypt via Caddy). The address lives only in `deploy/host.env`; the Caddyfile site address must match it (`deploy.sh` checks).
 - **SSH:** `ssh -i C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519 -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes root@178.104.181.220`.
 - **Firewall:** Hetzner firewall + ufw, inbound 22, 80, 443 only. Docker-published ports bypass ufw; only caddy publishes 80/443.

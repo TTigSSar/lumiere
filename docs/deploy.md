@@ -61,7 +61,7 @@ From Git Bash at the repo root:
 KEY=C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519
 # 0. SSH access works
 ssh -i $KEY -o IdentitiesOnly=yes root@178.104.181.220 true
-# 1. Host: 2 GB swap (if < 3 GB RAM, no swap), Docker + compose plugin, ufw 22/80/443,
+# 1. Host: key-only sshd (10-lumiere.conf), 2 GB swap (if < 3 GB RAM, no swap), Docker + compose plugin, ufw 22/80/443,
 #    unattended-upgrades, /opt/lumiere/{src,secrets}
 deploy/bootstrap-remote.sh
 # 2. Secrets

@@ -16,6 +16,36 @@ if hostname -I 2>/dev/null | tr ' ' '\n' | grep -qxF '91.98.170.128' || [ -e /op
   exit 97
 fi
 
+step "SSH hardening: key-only login (drop-in 10-lumiere.conf, validated before reload)"
+# Only once the Lumière key is authorised — otherwise turning passwords off would lock us out.
+LUMIERE_KEY_FP='SHA256:raU3xnahAV7lczGdFqiSN7sbQVFLJkpvhDjlo5nEia4'
+SSHD_DROPIN=/etc/ssh/sshd_config.d/10-lumiere.conf
+if [ ! -s /root/.ssh/authorized_keys ] || ! ssh-keygen -lf /root/.ssh/authorized_keys 2>/dev/null | grep -qF "$LUMIERE_KEY_FP"; then
+  echo "ABORT: the lumiere-demo key ($LUMIERE_KEY_FP) is not in /root/.ssh/authorized_keys; sshd left unchanged" >&2
+  exit 1
+fi
+# 10- sorts before cloud-init's 50-cloud-init.conf (PasswordAuthentication yes); sshd keeps the first value.
+want='# Managed by deploy/bootstrap.sh (Lumiere demo): key-only SSH.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password'
+if [ "$(cat "$SSHD_DROPIN" 2>/dev/null)" != "$want" ]; then
+  backup=""
+  [ -f "$SSHD_DROPIN" ] && { backup="$SSHD_DROPIN.bak"; cp -p "$SSHD_DROPIN" "$backup"; }
+  printf '%s\n' "$want" > "$SSHD_DROPIN"
+  chmod 644 "$SSHD_DROPIN"
+  if ! sshd -t; then
+    echo "sshd -t rejected the config; reverting $SSHD_DROPIN" >&2
+    if [ -n "$backup" ]; then mv -f "$backup" "$SSHD_DROPIN"; else rm -f "$SSHD_DROPIN"; fi
+    exit 1
+  fi
+  systemctl reload ssh
+  echo "sshd reloaded with $SSHD_DROPIN"
+else
+  echo "$SSHD_DROPIN already in place"
+fi
+sshd -T | grep -Ei '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) '
+
 step "Swap: 2 GB swapfile if the host has < 3 GB RAM and no swap (the .NET SDK build needs headroom)"
 mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
 if [ -n "$(swapon --noheadings --show=NAME 2>/dev/null)" ]; then
