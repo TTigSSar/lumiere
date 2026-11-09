@@ -64,7 +64,6 @@ A re-run that turns green is not evidence. A structural question → `NEEDS_INPU
 
 | Command | What |
 |---|---|
-| `node tools/g0-probe/probe.mjs` | G0 capture endpoint (discovery only) |
 
 ## Salon facts
 

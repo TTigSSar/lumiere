@@ -32,7 +32,6 @@ Decisions: [docs/decisions.md](docs/decisions.md).
 | `docs/google-calendar-setup.md` | Dedicated Google account, calendar, service account |
 | `docs/vendor-questions.md` | Questions for Suisse Line support |
 | `docs/assistant/system-prompt.md` | Assistant persona, salon facts, booking rules |
-| `tools/g0-probe/` | Throwaway capture endpoint for G0 (deleted after P0) |
 
 ## Secrets
 
