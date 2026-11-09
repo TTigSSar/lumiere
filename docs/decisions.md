@@ -89,6 +89,7 @@ necessity; the chat is private to staff.
 Hetzner CX22 running one compose project (`app` + `caddy`), HTTPS via Let's Encrypt on an
 `sslip.io` hostname derived from the server IP (no domain needed). Server deleted after the interview.
 Provisioning, DNS and deploys each need explicit approval.
+**Amendment (Tigran, 2026-11-09):** Server type CPX12 (2 GB, 1 vCPU, x86, Falkenstein) instead of CX22 — CX22 unavailable; 2 GB swapfile added for the on-box .NET build.
 
 ## ADR-009 — Salon time and scheduling rules
 **Status:** Accepted
