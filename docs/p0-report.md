@@ -55,9 +55,9 @@ All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by s
 |---|---|---|---|---|
 | `POST /tools/check-availability` | `service`, `date_hint`, `part_of_day?` | `today`, ≤ 3 `{slot_id, spoken_label}` | `UNKNOWN_SERVICE`, `CLOSED` (+ next open day), `CALENDAR_UNAVAILABLE` | read-only |
 | `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone?`² | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | `slot_id + caller phone` |
-| `POST /tools/my-appointments` | `caller_phone`¹ | ≤ 3 `{booking_id, spoken_label}` | — | read-only |
-| `POST /tools/cancel` | `booking_id`, `caller_phone`¹ | `cancelled` | `NOT_FOUND` (incl. foreign bookings) | repeat-safe |
-| `POST /tools/join-waitlist` | `service`, `preferred_days`, `part_of_day`, `first_name`, `caller_phone`¹ | `waitlist_id` | `INVALID_WINDOW` | `service + caller_phone` |
+| `POST /tools/my-appointments` | `caller_phone?`² | ≤ 3 future confirmed own bookings `appointments: [{booking_id, spoken_label}]` (e.g. "men's cut on Tuesday, 10 November at 12:00"); none → `ok:true`, empty list | `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | read-only |
+| `POST /tools/cancel` | `booking_id`, `caller_phone?`² | `booking_id`, `cancelled: true` | `NOT_FOUND` (missing, foreign, past or not an AI booking — indistinguishable), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | repeat-safe: an own already-cancelled booking returns the same success; recovery fires only for the call that cancelled |
+| `POST /tools/join-waitlist` | `service`, `preferred_days` (caller's words), `part_of_day?`, `first_name`, `caller_phone?`² | `waitlist_id` | `UNKNOWN_SERVICE`, `PHONE_REQUIRED`, `INVALID_NAME`, `INVALID_WINDOW` (no open day within 14 days parsed) | same phone + service with an Active entry → updated, same `waitlist_id` |
 | `POST /webhooks/suisse` | vendor event | 204 | 401 bad signature | event id |
 | `GET /health` | — | 200 | — | — |
 
@@ -65,8 +65,12 @@ All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by s
 ² Caller = top-level body field `phoneNumber` (call metadata) when it is a valid number — it overrides
 `caller_phone`; otherwise (`unknown`, `Browser Test`, missing) the optional spoken `caller_phone`;
 neither valid → `PHONE_REQUIRED` (ADR-014 / ADR-006 amendment).
-Rescheduling = book new slot, then cancel old (no extra endpoint). Cancellation triggers
-Cancellation Recovery internally → Telegram message to staff.
+Rescheduling = book new slot, then cancel old (no extra endpoint). A successful cancellation triggers
+Cancellation Recovery in the background (never affects the cancel response) → Telegram message to staff
+with the best waitlist match, or a masked log line when Telegram is not configured (ADR-007).
+`preferred_days` accepts weekday lists ("Tuesday or Thursday", "Saturdays"), "weekdays", "weekends",
+"this week", "next week", "any day"/"anytime" and single or listed dates; it is resolved to open days
+within the next 14 days (today included).
 
 ## 6. Roadmap (≈ 11 h)
 

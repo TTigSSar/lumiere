@@ -16,7 +16,7 @@ Caller ── phone ──► Suisse Line (STT · LLM · TTS · system prompt)
               ASP.NET Core 8 minimal API (single instance, modular monolith)
                 ├─ Booking rules · signed slot IDs · serialized booking · idempotency
                 ├─ Google Calendar ── source of truth for appointments
-                ├─ SQLite ── waitlist + idempotency keys only
+                ├─ SQLite ── waitlist only (Microsoft.Data.Sqlite)
                 └─ Cancellation Recovery ──► Telegram (salon staff only)
 ```
 
