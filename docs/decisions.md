@@ -181,8 +181,31 @@ The official API spec documents custom headers on webhooks but no HMAC signing. 
 webhooks with a shared-secret header (constant-time compare) instead of HMAC; disable `transcript`
 and `recordingUrl` payload fields. Production note: request HMAC signing from the vendor.
 
-## ADR-012 — G0 probe is throwaway Node.js
+## ADR-012 — G0 probe is throwaway Node.js (closed — removed per ADR-018)
 **Status:** Proposed
 **Decision:** The G0 capture endpoint is a dependency-free Node script under `tools/g0-probe/`,
 deleted after P0. It is a discovery instrument, not product code, so it does not set a precedent
 for the stack.
+
+## ADR-018 — Milestone review follow-ups (feature-complete review)
+**Status:** Accepted (Tigran, 2026-11-09 — "yes to all recommendations")
+1. **Fail fast on calendar config (C-1).** Outside Development the service refuses to start without
+   `GOOGLE_CALENDAR_ID` and `GOOGLE_SERVICE_ACCOUNT_KEY_PATH`; the in-memory calendar exists only in
+   Development and tests. `/health` reports the calendar mode.
+2. **Identity strength per action (M-1, amends ADR-006/014).** `my-appointments` and `cancel` require
+   the caller identity from call metadata (`phoneNumber`). A spoken number may only be used to `book`
+   and `join-waitlist`; list/cancel without metadata → `IDENTITY_REQUIRED` (say: please call from the
+   phone number used for the booking). Browser test calls therefore cannot list or cancel.
+3. **Per-request deadline (M-2, amends ADR-015).** Each tool request has a total budget of 7 s across
+   all calendar calls, including waiting for the booking lock; the 3 s per-call cap stays. When the
+   budget is exhausted the response is `CALENDAR_UNAVAILABLE` and no further calendar write is started.
+4. **Business codes (m-6, amends ADR-016).** Complete list, all HTTP 200 + `ok:false`:
+   `UNKNOWN_SERVICE`, `DATE_UNCLEAR`, `DATE_IN_PAST`, `BEYOND_HORIZON`, `DATE_MISMATCH`, `CLOSED`,
+   `NO_AVAILABILITY`, `SLOT_INVALID`, `SLOT_TAKEN`, `PHONE_REQUIRED`, `IDENTITY_REQUIRED`,
+   `INVALID_NAME`, `INVALID_WINDOW`, `NOT_FOUND`, `CALENDAR_UNAVAILABLE`. Non-2xx only 400/401.
+5. **Robustness (m-5).** No input may produce HTTP 500 (e.g. year 0000); unparseable → `DATE_UNCLEAR`.
+6. **G0 probe removed (m-7).** `tools/g0-probe/` is deleted; ADR-012 closed. Findings live in
+   `docs/g0-results.md`.
+7. **No false promises in the prompt (m-8).** The assistant does not promise to "take a message";
+   for anything outside its tools it asks the caller to call during opening hours.
+8. **Known limitations** (documented, not fixed): see `docs/limitations.md`.
