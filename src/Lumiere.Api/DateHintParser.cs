@@ -16,6 +16,9 @@ public static partial class DateHintParser
     private static readonly string[] Months =
         ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
+    /// <summary>A yearless date at most this many days ago is read as the past, not next year (ADR-018 m-5).</summary>
+    public const int RecentPastDays = 30;
+
     /// <summary>The parsed date (null = unclear) and, when the caller stated a weekday that the date does not fall on, that weekday.</summary>
     public readonly record struct Result(DateOnly? Date, DayOfWeek? MismatchedWeekday);
 
@@ -78,9 +81,12 @@ public static partial class DateHintParser
         {
             var hasYear = int.TryParse(md.Groups["year"].Value, out var year);
             if (!hasYear) year = today.Year;
-            if (day > DateTime.DaysInMonth(year, month)) return null;
+            // Out-of-range numbers ("0 November", "12 November 0000") are unclear, never an exception (ADR-018 m-5).
+            if (year is < 1 or > 9998 || day < 1 || day > DateTime.DaysInMonth(year, month)) return null;
             var date = new DateOnly(year, month, day);
-            if (!hasYear && date < today) date = date.AddYears(1);
+            // A yearless day within the last RecentPastDays is the past ("8 November" on 9 November → DATE_IN_PAST,
+            // not BEYOND_HORIZON); an older one means next year ("2 January" in November).
+            if (!hasYear && date < today && today.DayNumber - date.DayNumber > RecentPastDays) date = date.AddYears(1);
             return date;
         }
         return null;

@@ -39,7 +39,34 @@ public class DateHintTests
     [InlineData("sometime soon")]
     [InlineData("31 February")]
     [InlineData("whenever you have time")]
+    // Out-of-range numbers are unclear, never an exception (ADR-018 m-5).
+    [InlineData("12 November 0000")]
+    [InlineData("Thursday 12 November 0000")]
+    [InlineData("0 November")]
+    [InlineData("November 0")]
+    [InlineData("November 99")]
+    [InlineData("12 November 9999")]
+    [InlineData("0000-01-01")]
     public void Unclear(string hint) => Assert.Null(DateHintParser.Parse(hint, Monday));
+
+    [Theory]
+    [InlineData("8 November", "2026-11-08")]  // said on 9 November: yesterday, not next year (→ DATE_IN_PAST)
+    [InlineData("November 1st", "2026-11-01")]
+    [InlineData("10 October", "2026-10-10")]  // 30 days ago: still the recent past
+    [InlineData("9 October", "2027-10-09")]   // 31 days ago: next year (→ BEYOND_HORIZON)
+    [InlineData("2 January", "2027-01-02")]
+    public void Yearless_day_in_the_recent_past_stays_in_the_past(string hint, string expected) =>
+        Assert.Equal(DateOnly.Parse(expected), DateHintParser.Parse(hint, Monday));
+
+    [Fact]
+    public async Task Yesterday_by_date_is_DATE_IN_PAST_not_BEYOND_HORIZON()
+    {
+        var (svc, _, _, _) = Booking();
+        var r = await svc.CheckAvailabilityAsync("men's cut", "8 November", null, default);
+        Assert.Equal("DATE_IN_PAST", r.ErrorCode);
+        r = await svc.CheckAvailabilityAsync("men's cut", "12 November 0000", null, default);
+        Assert.Equal("DATE_UNCLEAR", r.ErrorCode);
+    }
 
     [Theory]
     [InlineData("Thursday 12 November")]
