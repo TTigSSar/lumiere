@@ -169,6 +169,12 @@ Everything else in the body stays unread and unlogged.
 **Not adopted:** spelling the name back before booking (Tigran, 2026-11-09) — ASR name errors are an
 accepted, documented limitation; staff see the phone number on every event.
 
+## ADR-017 — SQLite access library and webhook deferral
+**Status:** Accepted (Tigran, 2026-11-09)
+- SQLite access via `Microsoft.Data.Sqlite` with plain SQL — no ORM for a single table.
+- The `/webhooks/suisse` endpoint is deferred (not needed for the demo; calls are visible in the
+  Suisse Line dashboard and API). The ADR-010 webhook rules apply when it is built.
+
 ## ADR-010 amendment — webhook authentication
 **Status:** Accepted (Tigran, 2026-11-09)
 The official API spec documents custom headers on webhooks but no HMAC signing. Decision: verify
