@@ -49,22 +49,29 @@ See [README](../README.md) and [decisions.md](decisions.md) (ADR-002 … ADR-010
 ## 5. Minimal API contract (live tools)
 
 All responses: `{ ok, say, error_code? , ... }`. All requests authenticated by shared-secret header
-(or URL-path secret if headers are unsupported).
+(or URL-path secret if headers are unsupported). Business outcomes are HTTP 200 with `ok:false`; non-2xx only
+400 (malformed body) and 401 (secret). Any tool may also return `CALENDAR_UNAVAILABLE` when the 7 s per-request
+budget (lock wait + all calendar calls) is spent, and `INTERNAL` (say: "Sorry, something went wrong on my side.
+Could you say that again?") for an unexpected server error — never HTTP 500 (ADR-018).
 
 | Endpoint | Input | Output | Errors | Idempotency |
 |---|---|---|---|---|
 | `POST /tools/check-availability` | `service`, `date_hint`, `part_of_day?` | `today`, ≤ 3 `{slot_id, spoken_label}` | `UNKNOWN_SERVICE`, `CLOSED` (+ next open day), `DATE_MISMATCH` (stated weekday ≠ the date, e.g. "Friday 12 November" → "12 November is a Thursday — did you mean Thursday, 12 November, or a different day?"), `CALENDAR_UNAVAILABLE` | read-only |
 | `POST /tools/book` | `slot_id`, `first_name`, `last_name`, `caller_phone?`² | `booking_id`, `confirmation_text` | `SLOT_INVALID`, `SLOT_TAKEN` (+ 2 alternatives), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | `slot_id + caller phone` |
-| `POST /tools/my-appointments` | `caller_phone?`² | ≤ 3 future confirmed own bookings `appointments: [{booking_id, spoken_label}]` (e.g. "men's cut on Tuesday, 10 November at 12:00"); none → `ok:true`, empty list | `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | read-only |
-| `POST /tools/cancel` | `booking_id`, `caller_phone?`² | `booking_id`, `cancelled: true` | `NOT_FOUND` (missing, foreign, past or not an AI booking — indistinguishable), `PHONE_REQUIRED`, `CALENDAR_UNAVAILABLE` | repeat-safe: an own already-cancelled booking returns the same success; recovery fires only for the call that cancelled |
+| `POST /tools/my-appointments` | `caller_phone?`² | ≤ 3 future confirmed own bookings `appointments: [{booking_id, spoken_label}]` (e.g. "men's cut on Tuesday, 10 November at 12:00"); none → `ok:true`, empty list | `IDENTITY_REQUIRED`³, `CALENDAR_UNAVAILABLE` | read-only |
+| `POST /tools/cancel` | `booking_id`, `caller_phone?`² | `booking_id`, `cancelled: true` | `NOT_FOUND` (missing, foreign, past or not an AI booking — indistinguishable), `IDENTITY_REQUIRED`³, `CALENDAR_UNAVAILABLE` | repeat-safe: an own already-cancelled booking returns the same success; recovery fires only for the call that cancelled |
 | `POST /tools/join-waitlist` | `service`, `preferred_days` (caller's words), `part_of_day?`, `first_name`, `caller_phone?`² | `waitlist_id` | `UNKNOWN_SERVICE`, `PHONE_REQUIRED`, `INVALID_NAME`, `INVALID_WINDOW` (no open day within 14 days parsed) | same phone + service with an Active entry → updated, same `waitlist_id` |
 | `POST /webhooks/suisse` | vendor event | 204 | 401 bad signature | event id |
-| `GET /health` | — | 200 | — | — |
+| `GET /health` | — | 200 `{ ok: true, calendar: "google" \| "in-memory", notifier: "telegram" \| "log" }` — modes only, no configuration values | — | — |
 
 ¹ From call metadata if G0 shows it is available; otherwise spoken + normalised (ADR-006).
 ² Caller = top-level body field `phoneNumber` (call metadata) when it is a valid number — it overrides
 `caller_phone`; otherwise (`unknown`, `Browser Test`, missing) the optional spoken `caller_phone`;
 neither valid → `PHONE_REQUIRED` (ADR-014 / ADR-006 amendment).
+³ `my-appointments` and `cancel` accept only the call-metadata `phoneNumber` (ADR-018 M-1); a spoken
+`caller_phone` or no number → `IDENTITY_REQUIRED` (say: "For your security I can only look up or cancel
+appointments when you call from the phone number used for the booking."). The assistant reads the say and
+does not ask for a number. `book` and `join-waitlist` still accept the spoken number.
 Rescheduling = book new slot, then cancel old (no extra endpoint). A successful cancellation triggers
 Cancellation Recovery in the background (never affects the cancel response) → Telegram message to staff
 with the best waitlist match, or a masked log line when Telegram is not configured (ADR-007).
