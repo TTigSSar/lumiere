@@ -1,0 +1,7 @@
+# Infra files run on Linux (and in Git Bash): always LF, regardless of core.autocrlf.
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+deploy/Caddyfile text eol=lf
+deploy/*.yml text eol=lf
+deploy/*.example text eol=lf
