@@ -20,7 +20,10 @@ public sealed record CalendarEvent(
 /// <summary>Thrown by <see cref="ICalendar.InsertAsync"/> when an event with the supplied id already exists (Google: HTTP 409).</summary>
 public sealed class CalendarConflictException(string eventId) : Exception($"Event id already exists: {eventId}");
 
-/// <summary>The appointment calendar (ADR-003). Implementations never delete events.</summary>
+/// <summary>
+/// The appointment calendar (ADR-003). Implementations never delete competing events (ADR-005); the only removal is
+/// <see cref="CancelAsync"/> of a booking whose ownership the caller has already verified (ADR-006).
+/// </summary>
 public interface ICalendar
 {
     /// <summary>Busy (non-cancelled) events overlapping [fromUtc, toUtc], recurring events expanded, ordered by start.</summary>
@@ -35,6 +38,14 @@ public interface ICalendar
 
     /// <summary>Overwrites the existing event <c>ev.Id</c> with <paramref name="ev"/> and marks it confirmed (undelete).</summary>
     Task RestoreAsync(CalendarEvent ev, CancellationToken ct);
+
+    /// <summary>Confirmed (non-cancelled) events whose private property <c>phoneHash</c> equals <paramref name="phoneHash"/>
+    /// and that end after <paramref name="fromUtc"/>, ordered by start.</summary>
+    Task<IReadOnlyList<CalendarEvent>> ListByPhoneHashAsync(string phoneHash, DateTimeOffset fromUtc, CancellationToken ct);
+
+    /// <summary>Cancels the event with this id (Google keeps it with status "cancelled"). Cancelling an already
+    /// cancelled event is a no-op.</summary>
+    Task CancelAsync(string id, CancellationToken ct);
 }
 
 /// <summary>Deterministic per-booking Google event id (ADR-015).</summary>
@@ -82,6 +93,8 @@ public sealed class InMemoryCalendar : ICalendar
     public Exception? InsertFailsAfterCommit { get; set; }
     /// <summary>GetAsync throws this.</summary>
     public Exception? GetFails { get; set; }
+    /// <summary>CancelAsync throws this before cancelling anything.</summary>
+    public Exception? CancelFails { get; set; }
 
     public int InsertCalls => Volatile.Read(ref _insertCalls);
 
@@ -126,6 +139,27 @@ public sealed class InMemoryCalendar : ICalendar
             var i = _events.FindIndex(e => e.Id == ev.Id);
             if (i < 0) throw new InvalidOperationException($"No event {ev.Id} to restore");
             _events[i] = ev with { Cancelled = false };
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<CalendarEvent>> ListByPhoneHashAsync(string phoneHash, DateTimeOffset fromUtc, CancellationToken ct)
+    {
+        lock (_gate)
+            return Task.FromResult<IReadOnlyList<CalendarEvent>>(_events
+                .Where(e => !e.Cancelled && e.EndUtc > fromUtc
+                    && e.PrivateProperties.TryGetValue("phoneHash", out var h) && h == phoneHash)
+                .OrderBy(e => e.StartUtc).ToList());
+    }
+
+    public Task CancelAsync(string id, CancellationToken ct)
+    {
+        if (CancelFails is { } failure) throw failure;
+        lock (_gate)
+        {
+            var i = _events.FindIndex(e => e.Id == id);
+            if (i < 0) throw new InvalidOperationException($"No event {id} to cancel");
+            _events[i] = _events[i] with { Cancelled = true };
         }
         return Task.CompletedTask;
     }

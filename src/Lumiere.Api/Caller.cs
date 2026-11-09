@@ -37,6 +37,12 @@ public static partial class Caller
             : $"{e164[..3]} *** {e164[^2..]}";
     }
 
+    /// <summary>"+41 79 123 45 67" for Swiss numbers, E.164 otherwise — for the private staff chat only (ADR-007).</summary>
+    public static string FormatPhone(string e164) =>
+        e164.StartsWith("+41") && e164.Length == 12
+            ? $"+41 {e164[3..5]} {e164[5..8]} {e164[8..10]} {e164[10..]}"
+            : e164;
+
     public static string PhoneHash(string e164, byte[] key) =>
         Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(e164))).ToLowerInvariant();
 

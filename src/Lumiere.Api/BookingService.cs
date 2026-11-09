@@ -1,6 +1,17 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace Lumiere.Api;
 
 public sealed record SlotDto(string SlotId, string SpokenLabel);
+
+public sealed record AppointmentDto(string BookingId, string SpokenLabel);
+
+/// <summary>A slot freed by a cancellation: its start and the cancelled service (input to Cancellation Recovery, ADR-007).</summary>
+public sealed record FreedSlot(DateTimeOffset StartUtc, Service Service);
+
+/// <summary>The cancel response plus the freed slot — set only when this call actually cancelled the event.</summary>
+public sealed record CancelOutcome(ToolResult Result, FreedSlot? Freed);
 
 /// <summary>Tool response. Business failures are ok:false with error_code and say (ADR-014).</summary>
 public sealed record ToolResult
@@ -13,6 +24,9 @@ public sealed record ToolResult
     public string? Note { get; init; }
     public string? BookingId { get; init; }
     public string? ConfirmationText { get; init; }
+    public IReadOnlyList<AppointmentDto>? Appointments { get; init; }
+    public bool? Cancelled { get; init; }
+    public string? WaitlistId { get; init; }
 
     public static ToolResult Fail(string code, string say) => new() { Ok = false, ErrorCode = code, Say = say };
 }
@@ -148,6 +162,102 @@ public sealed class BookingService(ICalendar calendar, TimeProvider clock, SlotI
         {
             BookingLock.Release();
         }
+    }
+
+    public const int MaxAppointments = 3;
+
+    private static readonly ToolResult PhoneRequired =
+        ToolResult.Fail("PHONE_REQUIRED", "May I have your phone number, please, including the area code?");
+
+    private static readonly ToolResult BookingNotFound = ToolResult.Fail("NOT_FOUND",
+        "I can't find that appointment for this phone number. Shall I check your upcoming appointments?");
+
+    /// <summary>Up to 3 future confirmed bookings of the caller (ADR-006: matched by phone hash only).</summary>
+    public async Task<ToolResult> MyAppointmentsAsync(string? callerPhone, CancellationToken ct)
+    {
+        if (Caller.NormalisePhone(callerPhone) is not { } phone) return PhoneRequired;
+        var now = clock.GetUtcNow();
+        IReadOnlyList<CalendarEvent> events;
+        try { events = await WithTimeout(t => calendar.ListByPhoneHashAsync(Caller.PhoneHash(phone, phoneHashKey), now, t), ct); }
+        catch (Exception) { return CalendarUnavailable(booking: false); }
+
+        var own = events
+            .Where(e => !e.Cancelled && e.Id is not null && e.StartUtc > now && ServiceOf(e) is not null)
+            .OrderBy(e => e.StartUtc).Take(MaxAppointments)
+            .Select(e => (Event: e, Service: ServiceOf(e)!)).ToList();
+        if (own.Count == 0)
+            return new ToolResult { Ok = true, Appointments = [], Say = "I can't find any upcoming appointments for this number." };
+
+        var list = own.Select(o => new AppointmentDto(o.Event.Id!, AppointmentLabel(o.Service, o.Event.StartUtc))).ToList();
+        var spoken = own.Select(o => $"{o.Service.WithArticle} on {Salon.SpokenLabel(o.Event.StartUtc)}").ToList();
+        var say = spoken.Count == 1
+            ? $"I can see {spoken[0]}."
+            : $"I can see {spoken.Count} upcoming appointments: {string.Join(", ", spoken.Take(spoken.Count - 1))} and {spoken[^1]}.";
+        return new ToolResult { Ok = true, Appointments = list, Say = say };
+    }
+
+    /// <summary>
+    /// Cancels the caller's own future booking, serialized with bookings (ADR-005). A missing, foreign, past or
+    /// non-booking event is NOT_FOUND (ADR-006 — never reveal that a foreign booking exists). Repeat-safe: an own
+    /// booking that is already cancelled answers the same success, but only the call that cancelled it frees a slot.
+    /// </summary>
+    public async Task<CancelOutcome> CancelAsync(string? bookingId, string? callerPhone, CancellationToken ct)
+    {
+        if (Caller.NormalisePhone(callerPhone) is not { } phone) return new(PhoneRequired, null);
+        var id = (bookingId ?? "").Trim();
+        if (id.Length == 0 || id.Length > 1024) return new(BookingNotFound, null);
+
+        await BookingLock.WaitAsync(ct);
+        try
+        {
+            CalendarEvent? ev;
+            try { ev = await WithTimeout(t => calendar.GetAsync(id, t), ct); }
+            catch (Exception) { return new(CalendarUnavailable(booking: false), null); }
+
+            var now = clock.GetUtcNow();
+            if (ev is null || ServiceOf(ev) is not { } service || !Owns(ev, id, service, phone) || ev.StartUtc <= now)
+                return new(BookingNotFound, null);
+
+            var text = $"Your {service.SpokenName} on {Salon.SpokenLabel(ev.StartUtc)} has been cancelled.";
+            var success = new ToolResult { Ok = true, BookingId = id, Cancelled = true, Say = text };
+            if (ev.Cancelled) return new(success, null);
+
+            try
+            {
+                await WithTimeout(async t => { await calendar.CancelAsync(id, t); return true; }, ct);
+            }
+            catch (Exception)
+            {
+                // Timeout or error: Google may have cancelled it anyway — look once before answering.
+                CalendarEvent? after;
+                try { after = await WithTimeout(t => calendar.GetAsync(id, t), ct, LookupTimeout); }
+                catch (Exception) { after = null; }
+                if (after is not { Cancelled: true })
+                    return new(ToolResult.Fail("CALENDAR_UNAVAILABLE",
+                        "Sorry, I can't reach our calendar right now, so the appointment is not cancelled yet. Shall I try again in a moment?"), null);
+            }
+            return new(success, new FreedSlot(ev.StartUtc, service));
+        }
+        finally
+        {
+            BookingLock.Release();
+        }
+    }
+
+    /// <summary>"men's cut on Tuesday, 10 November at 12:00".</summary>
+    public static string AppointmentLabel(Service service, DateTimeOffset startUtc) => $"{service.SpokenName} on {Salon.SpokenLabel(startUtc)}";
+
+    private static Service? ServiceOf(CalendarEvent e) =>
+        e.PrivateProperties.TryGetValue("service", out var key) ? Salon.FindService(key) : null;
+
+    /// <summary>The phone hash matches; or, when Google returns a cancelled event without it, the deterministic
+    /// event id recomputed with the caller's phone matches (ADR-015).</summary>
+    private bool Owns(CalendarEvent e, string id, Service service, string phone)
+    {
+        if (e.PrivateProperties.TryGetValue("phoneHash", out var hash))
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.ASCII.GetBytes(hash), Encoding.ASCII.GetBytes(Caller.PhoneHash(phone, phoneHashKey)));
+        return e.StartUtc != default && EventIds.For(e.StartUtc, service.Key, phone, phoneHashKey) == id;
     }
 
     /// <summary>One get-by-id with its own short budget; false when missing, cancelled or unreachable.</summary>

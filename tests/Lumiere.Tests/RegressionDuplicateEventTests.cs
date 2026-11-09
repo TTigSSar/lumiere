@@ -162,6 +162,9 @@ public class RegressionDuplicateEventTests
         }
 
         public Task RestoreAsync(CalendarEvent ev, CancellationToken ct) => inner.RestoreAsync(ev, ct);
+        public Task<IReadOnlyList<CalendarEvent>> ListByPhoneHashAsync(string phoneHash, DateTimeOffset fromUtc, CancellationToken ct) =>
+            inner.ListByPhoneHashAsync(phoneHash, fromUtc, ct);
+        public Task CancelAsync(string id, CancellationToken ct) => inner.CancelAsync(id, ct);
 
         /// <summary>Waits until every insert started so far has finished (committed, conflicted or failed).</summary>
         public async Task InsertsSettled(TimeSpan limit)

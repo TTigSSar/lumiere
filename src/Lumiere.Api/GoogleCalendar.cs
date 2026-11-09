@@ -4,13 +4,15 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Calendar.v3;
 using Google.Apis.Calendar.v3.Data;
 using Google.Apis.Services;
+using Google.Apis.Util;
 
 namespace Lumiere.Api;
 
 /// <summary>
 /// Google Calendar adapter (ADR-003): service account, scope calendar.events only; events.list, events.insert with a
-/// client-supplied id (ADR-015), events.get and events.update (restore). Never deletes.
-/// The client-supplied id, the 409 path, events.get and events.update are NOT YET EXERCISED against a real calendar.
+/// client-supplied id (ADR-015), events.get, events.update (restore), events.list by privateExtendedProperty
+/// (caller's bookings) and events.delete (cancel an owned booking; Google keeps it as status "cancelled").
+/// events.update, the phoneHash list and events.delete are NOT YET EXERCISED against a real calendar.
 /// </summary>
 public sealed class GoogleCalendar : ICalendar
 {
@@ -89,6 +91,34 @@ public sealed class GoogleCalendar : ICalendar
         var body = ToGoogle(ev);
         body.Status = "confirmed";
         await _service.Events.Update(body, _calendarId, ev.Id).ExecuteAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<CalendarEvent>> ListByPhoneHashAsync(string phoneHash, DateTimeOffset fromUtc, CancellationToken ct)
+    {
+        var request = _service.Events.List(_calendarId);
+        request.PrivateExtendedProperty = new Repeatable<string>([$"phoneHash={phoneHash}"]);
+        request.TimeMinDateTimeOffset = fromUtc;
+        request.SingleEvents = true;
+        request.OrderBy = EventsResource.ListRequest.OrderByEnum.StartTime;
+        request.MaxResults = 10;
+        var page = await request.ExecuteAsync(ct);
+        var result = new List<CalendarEvent>();
+        foreach (var e in page.Items ?? [])
+        {
+            if (e.Status == "cancelled") continue;
+            var (start, end) = (ToUtc(e.Start), ToUtc(e.End));
+            if (start is null || end is null) continue;
+            result.Add(new CalendarEvent(e.Id, start.Value, end.Value, e.Summary ?? "", e.Description ?? "",
+                e.ExtendedProperties?.Private__?.AsReadOnly() ?? (IReadOnlyDictionary<string, string>)new Dictionary<string, string>()));
+        }
+        return result;
+    }
+
+    public async Task CancelAsync(string id, CancellationToken ct)
+    {
+        try { await _service.Events.Delete(_calendarId, id).ExecuteAsync(ct); }
+        // 410 Gone: already deleted (cancelled) — cancelling twice is a no-op.
+        catch (GoogleApiException e) when (e.HttpStatusCode == HttpStatusCode.Gone) { }
     }
 
     private static Event ToGoogle(CalendarEvent ev) => new()

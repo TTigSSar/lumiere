@@ -44,6 +44,9 @@ public sealed class ThrowingCalendar : ICalendar
     public Task<string> InsertAsync(CalendarEvent ev, CancellationToken ct) => throw new HttpRequestException("calendar down");
     public Task<CalendarEvent?> GetAsync(string id, CancellationToken ct) => Task.FromResult<CalendarEvent?>(null);
     public Task RestoreAsync(CalendarEvent ev, CancellationToken ct) => throw new HttpRequestException("calendar down");
+    public Task<IReadOnlyList<CalendarEvent>> ListByPhoneHashAsync(string phoneHash, DateTimeOffset fromUtc, CancellationToken ct) =>
+        throw new HttpRequestException("calendar down");
+    public Task CancelAsync(string id, CancellationToken ct) => throw new HttpRequestException("calendar down");
 }
 
 /// <summary>Captures every log line (message, state values, exception) at all levels.</summary>

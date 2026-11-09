@@ -203,5 +203,8 @@ public class BookingIdempotencyTests
         public Task<CalendarEvent?> GetAsync(string id, CancellationToken ct) =>
             Interlocked.Increment(ref _gets) == 1 ? Task.FromResult<CalendarEvent?>(null) : inner.GetAsync(id, ct);
         public Task RestoreAsync(CalendarEvent ev, CancellationToken ct) => inner.RestoreAsync(ev, ct);
+        public Task<IReadOnlyList<CalendarEvent>> ListByPhoneHashAsync(string phoneHash, DateTimeOffset fromUtc, CancellationToken ct) =>
+            inner.ListByPhoneHashAsync(phoneHash, fromUtc, ct);
+        public Task CancelAsync(string id, CancellationToken ct) => inner.CancelAsync(id, ct);
     }
 }
