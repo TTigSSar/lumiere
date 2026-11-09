@@ -1,0 +1,61 @@
+# Demo stack on the dedicated Hetzner server (ADR-008). One compose project: app + caddy.
+# Run on the server from /opt/lumiere/src:
+#   docker compose -p lumiere -f deploy/compose.yml up -d --build
+# NEVER `down -v`: the app-data volume holds the SQLite waitlist (ADR-004).
+name: lumiere
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: lumiere-app:latest
+    env_file:
+      - /opt/lumiere/app.env
+    volumes:
+      - app-data:/data
+      - /opt/lumiere/secrets/service-account.json:/run/secrets/service-account.json:ro
+    # Not published on the host: only caddy reaches it over the compose network.
+    expose:
+      - "8080"
+    mem_limit: 512m
+    restart: unless-stopped
+    healthcheck:
+      # The aspnet image has no curl/wget; bash /dev/tcp against 127.0.0.1 (never localhost).
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\nHost: 127.0.0.1\\r\\n\\r\\n' >&3 && grep -q '\"ok\":true' <&3"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  app-data:
+  caddy-data:   # Let's Encrypt account + certificates — keep it (rate limits)
+  caddy-config:

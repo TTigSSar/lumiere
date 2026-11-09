@@ -1,0 +1,29 @@
+# Allow-list: the image only needs src/. Everything else stays out of the build context.
+*
+!src/
+
+# Secrets — never in the context, even if they land under src/
+**/.env
+**/.env.*
+**/*.pem
+**/*service-account*.json
+**/secrets/
+
+# Build output and runtime data
+**/bin/
+**/obj/
+**/data/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.user
+**/.vs/
+**/TestResults/
+
+# Not part of the image (also excluded by the allow-list above; listed for clarity)
+.git/
+tests/
+docs/
+agent/
+tools/
+deploy/

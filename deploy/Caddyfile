@@ -1,0 +1,17 @@
+# Public HTTPS entry point (ADR-008). Certificate: Let's Encrypt, automatic.
+# HTTP on :80 is redirected to HTTPS by Caddy.
+91-98-170-128.sslip.io {
+	request_body {
+		max_size 1MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy app:8080
+}
