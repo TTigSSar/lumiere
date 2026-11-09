@@ -10,7 +10,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BASE_URL="${LUMIERE_BASE_URL:-https://91-98-170-128.sslip.io}"
+# shellcheck disable=SC1091
+. "$(dirname "$0")/lib.sh"   # BASE_URL from deploy/host.env (override: LUMIERE_BASE_URL)
+lumiere_guard_url "$BASE_URL"
 ENV_FILE="$REPO_ROOT/.env"
 FAIL=0
 

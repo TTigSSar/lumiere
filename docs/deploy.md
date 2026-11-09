@@ -6,10 +6,11 @@ It shares nothing with any other project (ADR-001). The server is deleted after 
 | Fact | Value |
 |---|---|
 | Hetzner project | `lumiere-demo` (own project, nothing else in it) |
-| Server | `91.98.170.128`, Ubuntu 24.04 |
-| Public URL | `https://91-98-170-128.sslip.io` (Let's Encrypt via Caddy) |
+| Server | `178.104.181.220`, Falkenstein, 2 GB RAM / 40 GB disk, x86 (host facts: `.claude/agents/platform-engineer.md`) |
+| Public URL | `https://178-104-181-220.sslip.io` (Let's Encrypt via Caddy) |
 | Firewall | Hetzner firewall + ufw: inbound 22, 80, 443 only |
-| SSH | `ssh -i C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519 root@91.98.170.128` |
+| SSH | `ssh -i C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519 -o IdentitiesOnly=yes root@178.104.181.220` |
+| Address config | `deploy/host.env` — the only place the IP/hostname lives; all scripts source it via `deploy/lib.sh` |
 
 ## Architecture
 
@@ -59,9 +60,10 @@ From Git Bash at the repo root:
 ```bash
 KEY=C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519
 # 0. SSH access works
-ssh -i $KEY root@91.98.170.128 true
-# 1. Host: Docker + compose plugin, ufw 22/80/443, unattended-upgrades, /opt/lumiere/{src,secrets}
-ssh -i $KEY root@91.98.170.128 'bash -s' < deploy/bootstrap.sh
+ssh -i $KEY -o IdentitiesOnly=yes root@178.104.181.220 true
+# 1. Host: 2 GB swap (if < 3 GB RAM, no swap), Docker + compose plugin, ufw 22/80/443,
+#    unattended-upgrades, /opt/lumiere/{src,secrets}
+deploy/bootstrap-remote.sh
 # 2. Secrets
 deploy/push-secrets.sh
 # 3. Build + start (first build takes a few minutes; Caddy obtains the certificate on first start)
@@ -69,8 +71,8 @@ deploy/deploy.sh
 # 4. Live smoke over the public URL
 deploy/smoke.sh
 # 5. Point the Suisse Line agent at the server (laptop demo stays up until this step)
-node agent/apply.mjs --base-url https://91-98-170-128.sslip.io --dry-run
-node agent/apply.mjs --base-url https://91-98-170-128.sslip.io
+node agent/apply.mjs --base-url https://178-104-181-220.sslip.io --dry-run
+node agent/apply.mjs --base-url https://178-104-181-220.sslip.io
 ```
 
 ## Update
@@ -114,6 +116,12 @@ logs request bodies (ADR-010); Caddy access logging is off.
 4. Rotate `TOOL_SHARED_SECRET` and revoke the Google service-account key if the project continues.
 
 ## Notes
+
+- **Isolation guard (ADR-001).** `91.98.170.128` (ssh alias `dorent-prod`) is another project's
+  production server. `deploy/lib.sh` aborts every connecting script (exit 97) if the target is that IP,
+  that alias, or whatever the alias resolves to, and refuses any host other than `LUMIERE_IP` unless
+  `LUMIERE_ALLOW_OTHER_HOST=1`. `bootstrap.sh` repeats the check on the host itself. All ssh/scp calls
+  use `IdentitiesOnly=yes` so only the Lumière key is offered.
 
 - Docker-published ports bypass ufw; only caddy publishes 80/443, which are allowed anyway, and the
   Hetzner firewall in front enforces 22/80/443.

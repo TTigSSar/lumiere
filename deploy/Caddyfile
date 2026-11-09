@@ -1,6 +1,7 @@
 # Public HTTPS entry point (ADR-008). Certificate: Let's Encrypt, automatic.
 # HTTP on :80 is redirected to HTTPS by Caddy.
-91-98-170-128.sslip.io {
+# Site address must equal LUMIERE_HOSTNAME in deploy/host.env (deploy.sh checks this).
+178-104-181-220.sslip.io {
 	request_body {
 		max_size 1MB
 	}

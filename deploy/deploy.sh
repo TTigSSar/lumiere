@@ -8,11 +8,14 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOST="${LUMIERE_HOST:-root@91.98.170.128}"
-KEY="${LUMIERE_SSH_KEY:-C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519}"
-SSH_OPTS=(-i "$KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes)
+# shellcheck disable=SC1091
+. "$(dirname "$0")/lib.sh"   # HOST, KEY, SSH_OPTS (IdentitiesOnly), guards — address lives in deploy/host.env
+lumiere_guard_host "$HOST"
 
 cd "$REPO_ROOT"
+# The Caddyfile site address cannot read host.env — make sure it names the same host.
+grep -qxF "$LUMIERE_HOSTNAME {" deploy/Caddyfile \
+  || { echo "deploy/Caddyfile site address does not match LUMIERE_HOSTNAME=$LUMIERE_HOSTNAME (deploy/host.env)" >&2; exit 1; }
 SHA="$(git rev-parse --short HEAD)"
 if [ -n "$(git status --porcelain)" ]; then
   echo "WARNING: working tree has uncommitted changes; deploying committed HEAD $SHA only"

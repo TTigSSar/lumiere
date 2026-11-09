@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time host setup for the Lumière demo server (Ubuntu 24.04, ADR-008).
 # Run FROM THE LAPTOP (Git Bash), only after Tigran approved provisioning:
-#   ssh -i <key> root@91.98.170.128 'bash -s' < deploy/bootstrap.sh
+#   deploy/bootstrap-remote.sh        (guarded; target address from deploy/host.env)
 # Idempotent: safe to re-run. Touches only this host.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -9,6 +9,29 @@ export DEBIAN_FRONTEND=noninteractive
 step() { echo; echo "==> $*"; }
 
 [ "$(id -u)" -eq 0 ] || { echo "must run as root" >&2; exit 1; }
+
+# On-host isolation guard (ADR-001): never touch another project's server.
+if hostname -I 2>/dev/null | tr ' ' '\n' | grep -qxF '91.98.170.128' || [ -e /opt/dorent ]; then
+  echo "ABORT: this host is not the Lumiere demo server (91.98.170.128 / /opt/dorent present)" >&2
+  exit 97
+fi
+
+step "Swap: 2 GB swapfile if the host has < 3 GB RAM and no swap (the .NET SDK build needs headroom)"
+mem_kb=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+if [ -n "$(swapon --noheadings --show=NAME 2>/dev/null)" ]; then
+  echo "swap already active:"; swapon --show
+elif [ "$mem_kb" -ge 3000000 ]; then
+  echo "RAM ${mem_kb} kB >= 3 GB: no swap needed"
+else
+  if [ ! -f /swapfile ]; then
+    fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    chmod 600 /swapfile
+    mkswap /swapfile
+  fi
+  swapon /swapfile
+  grep -qE '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  swapon --show
+fi
 
 step "apt: base packages (ca-certificates, curl, gnupg, ufw, unattended-upgrades)"
 apt-get update -q

@@ -6,12 +6,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-HOST="${LUMIERE_HOST:-root@91.98.170.128}"
-KEY="${LUMIERE_SSH_KEY:-C:/Users/tigra/secrets/lumiere/lumiere_demo_ed25519}"
+# shellcheck disable=SC1091
+. "$(dirname "$0")/lib.sh"   # HOST, KEY, SSH_OPTS (IdentitiesOnly), guards — address lives in deploy/host.env
+lumiere_guard_host "$HOST"
 SA_JSON="${LUMIERE_SA_JSON:-C:/Users/tigra/secrets/lumiere/service-account.json}"
 ENV_FILE="$REPO_ROOT/.env"
 APP_UID=1654   # user "app" in mcr.microsoft.com/dotnet/aspnet:8.0
-SSH_OPTS=(-i "$KEY" -o StrictHostKeyChecking=accept-new -o BatchMode=yes)
 
 REQUIRED_KEYS=(TOOL_SHARED_SECRET SLOT_SIGNING_KEY GOOGLE_CALENDAR_ID TELEGRAM_BOT_TOKEN TELEGRAM_STAFF_CHAT_ID)
 
