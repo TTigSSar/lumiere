@@ -43,6 +43,29 @@ builder.Services.AddSingleton(sp => new BookingService(
     sp.GetRequiredService<ICalendar>(), sp.GetRequiredService<TimeProvider>(),
     sp.GetRequiredService<SlotIds>(), sp.GetRequiredService<SigningKey>().Bytes));
 
+builder.Services.AddSingleton(sp =>
+{
+    var configured = sp.GetRequiredService<IConfiguration>()["DATA_DIR"];
+    var dir = string.IsNullOrWhiteSpace(configured)
+        ? Path.Combine(sp.GetRequiredService<IHostEnvironment>().ContentRootPath, "data")
+        : configured;
+    return new WaitlistStore(dir);
+});
+builder.Services.AddSingleton<WaitlistService>();
+builder.Services.AddHostedService<WaitlistRetention>();
+
+builder.Services.AddSingleton<IStaffNotifier>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var (token, chatId) = (config["TELEGRAM_BOT_TOKEN"], config["TELEGRAM_STAFF_CHAT_ID"]);
+    if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(chatId))
+        return new TelegramNotifier(token, chatId);
+    sp.GetRequiredService<ILogger<Program>>().LogWarning(
+        "TELEGRAM_BOT_TOKEN / TELEGRAM_STAFF_CHAT_ID not set: staff notifications are written to the log (phone masked)");
+    return new LogNotifier(sp.GetRequiredService<ILogger<LogNotifier>>());
+});
+builder.Services.AddSingleton<CancellationRecovery>();
+
 var app = builder.Build();
 
 if (string.IsNullOrEmpty(app.Configuration["TOOL_SHARED_SECRET"]))
@@ -52,6 +75,7 @@ if (string.IsNullOrEmpty(app.Configuration["TOOL_SHARED_SECRET"]))
 }
 // Resolve eagerly so configuration problems surface at startup, not during a call.
 app.Services.GetRequiredService<BookingService>();
+app.Services.GetRequiredService<CancellationRecovery>();
 
 app.MapGet("/health", () => Results.Json(new { ok = true }));
 app.MapToolEndpoints();

@@ -21,6 +21,23 @@ public static class ToolEndpoints
         app.MapPost("/tools/book", (HttpContext http, BookingService booking) =>
             Handle(http, "book", (a, callerPhone, ct) =>
                 booking.BookAsync(a.GetValueOrDefault("slot_id"), a.GetValueOrDefault("first_name"), a.GetValueOrDefault("last_name"), callerPhone, ct)));
+
+        app.MapPost("/tools/my-appointments", (HttpContext http, BookingService booking) =>
+            Handle(http, "my-appointments", (_, callerPhone, ct) => booking.MyAppointmentsAsync(callerPhone, ct)));
+
+        app.MapPost("/tools/cancel", (HttpContext http, BookingService booking, CancellationRecovery recovery) =>
+            Handle(http, "cancel", async (a, callerPhone, ct) =>
+            {
+                var outcome = await booking.CancelAsync(a.GetValueOrDefault("booking_id"), callerPhone, ct);
+                // The response is decided; recovery runs in the background and can never change it (ADR-007).
+                if (outcome.Freed is { } freed) recovery.Trigger(freed);
+                return outcome.Result;
+            }));
+
+        app.MapPost("/tools/join-waitlist", (HttpContext http, WaitlistService waitlist) =>
+            Handle(http, "join-waitlist", (a, callerPhone, _) => Task.FromResult(waitlist.Join(
+                a.GetValueOrDefault("service"), a.GetValueOrDefault("preferred_days"), a.GetValueOrDefault("part_of_day"),
+                a.GetValueOrDefault("first_name"), callerPhone))));
     }
 
     private static async Task<IResult> Handle(HttpContext http, string endpoint,

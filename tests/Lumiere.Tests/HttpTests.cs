@@ -16,6 +16,7 @@ public sealed class HttpTests : IDisposable
     private const string Secret = "test-tool-secret";
     private readonly CapturingLoggerProvider _logs = new();
     private readonly InMemoryCalendar _calendar = new();
+    private readonly TempStore _db = new();
     private readonly WebApplicationFactory<Program> _factory;
     private readonly HttpClient _client;
 
@@ -25,6 +26,7 @@ public sealed class HttpTests : IDisposable
             .UseEnvironment("Testing")
             .UseSetting("TOOL_SHARED_SECRET", Secret)
             .UseSetting("SLOT_SIGNING_KEY", "test-signing-key")
+            .UseSetting("DATA_DIR", _db.Dir)
             .ConfigureLogging(l => l.AddProvider(_logs).AddFilter<CapturingLoggerProvider>(null, LogLevel.Trace))
             .ConfigureTestServices(s =>
             {
@@ -38,6 +40,7 @@ public sealed class HttpTests : IDisposable
     {
         _client.Dispose();
         _factory.Dispose();
+        _db.Dispose();
     }
 
     private static JsonObject Fixture() =>
