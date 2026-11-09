@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Google.Apis.Calendar.v3" Version="1.78.0.4285" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.33" />
   </ItemGroup>
 
 </Project>
