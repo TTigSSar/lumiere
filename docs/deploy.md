@@ -133,3 +133,4 @@ logs request bodies (ADR-010); Caddy access logging is off.
 
 | Date | Commit | Smoke | Notes |
 |---|---|---|---|
+| 2026-11-09 10:43 (Europe/Zurich) | `1a105b1` | PASS (health 200, HTTP→HTTPS 308, 401 without secret, check-availability `ok:true`) | First deploy. Bootstrap 34 s (key-only sshd verified: password login refused, key login OK; 2 GB swap; Docker 29.9.3, Compose v5.7.0; ufw 22/80/443). `deploy.sh` 37 s wall-clock (`dotnet publish` 6.2 s on 1 vCPU; swap barely touched). Let's Encrypt certificate issued on first Caddy start. Local `dotnet test -c Release`: 262/262. Suisse Line agent not switched yet (dry-run only). |
